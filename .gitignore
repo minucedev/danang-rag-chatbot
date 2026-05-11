@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual env
+.venv/
+
+# Environment
+.env
+backend/.env
+
+# Data
+backend/data/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node
+node_modules/
+danang-rag-chatbot/
+# Build
+dist/
+build/

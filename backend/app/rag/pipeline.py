@@ -109,7 +109,9 @@ class RAGPipeline:
 
         # 1. Build context-aware search query
         search_q = build_search_query(history, q)
-        intent = QueryIntent.detect(search_q)
+        # Detect intent from the raw user query to avoid context terms
+        # (e.g. previous "... Hotel") overriding the current intent.
+        intent = QueryIntent.detect(q)
         yield {"type": "intent", "value": intent.value, "display": intent.display}
 
         # 2. Retrieve

@@ -43,12 +43,16 @@ export async function* streamSSE(
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
+    // Normalize CRLF to LF so we can reliably split on double newlines
+    buffer = buffer.replace(/\r\n/g, "\n");
     let idx: number;
     while ((idx = buffer.indexOf("\n\n")) >= 0) {
       const chunk = buffer.slice(0, idx);
       buffer = buffer.slice(idx + 2);
       const event = parseChunk(chunk);
-      if (event) yield event;
+      if (event) {
+        yield event;
+      }
     }
   }
 }

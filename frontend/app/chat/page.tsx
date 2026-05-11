@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, Suspense } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { MessageSquare } from "lucide-react";
 import { QuickReplies } from "@/components/chat/QuickReplies";
@@ -8,25 +8,27 @@ import { MessageList } from "@/components/chat/MessageList";
 import { FilterSidebar } from "@/components/filters/FilterSidebar";
 import { useChat } from "@/hooks/useChat";
 import { useFilters } from "@/hooks/useFilters";
+import { useMessagesQuery } from "@/hooks/useSessions";
 
 function NewChatView() {
   const router = useRouter();
   const { filters } = useFilters();
   const { send, stop, status, streamingMsg, currentSessionId } = useChat(null);
-  const sentRef = useRef(false);
+  const { data: messages = [] } = useMessagesQuery(currentSessionId);
+  const [hasSent, setHasSent] = useState(false);
 
   const handleSend = (text: string) => {
-    sentRef.current = true;
+    setHasSent(true);
     send(text, filters);
   };
 
   useEffect(() => {
-    if (sentRef.current && status === "idle" && currentSessionId) {
+    if (hasSent && status === "idle" && currentSessionId) {
       router.replace(`/chat/${currentSessionId}`);
     }
-  }, [status, currentSessionId, router]);
+  }, [hasSent, status, currentSessionId, router]);
 
-  const showWelcome = !sentRef.current;
+  const showWelcome = !hasSent;
 
   return (
     <div className="flex flex-col h-full">
@@ -50,7 +52,7 @@ function NewChatView() {
             </div>
           </div>
         ) : (
-          <MessageList messages={[]} streamingMsg={streamingMsg} />
+          <MessageList messages={messages} streamingMsg={streamingMsg} />
         )}
       </div>
 

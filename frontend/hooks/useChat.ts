@@ -49,9 +49,36 @@ export function useChat(sessionId: string | null) {
           switch (event.type) {
             case "meta": {
               const sid = event.data.session_id as string;
+              const userMsgId = event.data.user_message_id as number | undefined;
+              const asstMsgId = event.data.assistant_message_id as number | undefined;
               if (sid !== sessionIdUsed) {
                 setCurrentSessionId(sid);
                 sessionIdUsed = sid;
+
+                // Optimistically seed messages cache so NewChat shows streaming immediately
+                qc.setQueryData<Message[]>(["messages", sid], (old) => {
+                  if (old && old.length > 0) return old;
+                  const now = Date.now();
+                  const userMsg: Message = {
+                    id: userMsgId ?? -1,
+                    session_id: sid,
+                    role: "user",
+                    content: message,
+                    sources: null,
+                    intent: null,
+                    created_at: now,
+                  };
+                  const asstMsg: Message = {
+                    id: asstMsgId ?? -1,
+                    session_id: sid,
+                    role: "assistant",
+                    content: "",
+                    sources: null,
+                    intent: null,
+                    created_at: now,
+                  };
+                  return [userMsg, asstMsg];
+                });
               }
               qc.invalidateQueries({ queryKey: ["sessions"] });
               break;

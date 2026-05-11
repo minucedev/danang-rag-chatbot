@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import re
 from typing import List, Optional
 
 from qdrant_client import AsyncQdrantClient
@@ -14,6 +15,54 @@ from app.utils.slugify_vn import slugify_vn
 
 # Per-request parent entity cache — reset between pipeline instances
 _parent_cache: dict[str, dict] = {}
+
+
+def _parse_number_token(token: str) -> Optional[float]:
+    raw = token.strip()
+    if not raw:
+        return None
+
+    # Handle common VN/EN numeric formats: 1.000.000 / 1,000,000 / 1,2
+    if "." in raw and "," in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    elif raw.count(".") > 1 or raw.count(",") > 1:
+        raw = raw.replace(".", "").replace(",", "")
+    elif "," in raw:
+        raw = raw.replace(",", ".")
+
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _extract_max_price_from_query(query: str) -> Optional[float]:
+    """Extract upper budget (VND) from phrases like 'dưới 1 triệu', '< 1tr'."""
+    q = normalize_nfc(query).lower()
+
+    pattern = re.compile(
+        r"(?:duoi|dưới|<|<=|khong\s+qua|không\s+quá|toi\s+da|tối\s+đa|max|tro\s+xuong|trở\s+xuống)\s*"
+        r"([0-9]+(?:[\.,][0-9]+)*)\s*"
+        r"(trieu|triệu|tr|m|nghin|nghìn|ngan|ngàn|k)?"
+    )
+    m = pattern.search(q)
+    if not m:
+        return None
+
+    value = _parse_number_token(m.group(1))
+    if value is None:
+        return None
+
+    unit = (m.group(2) or "").strip()
+    if unit in {"trieu", "triệu", "tr", "m"}:
+        return value * 1_000_000
+    if unit in {"nghin", "nghìn", "ngan", "ngàn", "k"}:
+        return value * 1_000
+
+    # No explicit unit: if big enough, assume already VND.
+    if value >= 100_000:
+        return value
+    return None
 
 
 async def _fetch_parent_entity(
@@ -180,6 +229,15 @@ async def retrieve_by_intent(
     if intent is None:
         intent = QueryIntent.detect(q)
 
+    effective_filters = dict(filters or {})
+    detected_max_price = _extract_max_price_from_query(q)
+    if detected_max_price is not None:
+        current_max = effective_filters.get("max_price")
+        if current_max is None:
+            effective_filters["max_price"] = detected_max_price
+        else:
+            effective_filters["max_price"] = min(float(current_max), detected_max_price)
+
     collections = CollectionRegistry.get_collections_by_intent(intent)
 
     # Encode in executor (SentenceTransformer.encode is synchronous)
@@ -191,7 +249,7 @@ async def retrieve_by_intent(
 
     # Retrieve from all collections in parallel
     tasks = [
-        retrieve_from_collection(col, query_vector, client, top_k_per_collection, filters, score_threshold)
+        retrieve_from_collection(col, query_vector, client, top_k_per_collection, effective_filters, score_threshold)
         for col in collections
     ]
     results_nested = await asyncio.gather(*tasks)
