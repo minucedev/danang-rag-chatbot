@@ -269,6 +269,36 @@ Xây giao diện chatbot **hoàn chỉnh, polished, demo-ready** cho hệ thốn
 
 ---
 
+## Phase 9 — Notebook sync addendum
+
+> Phát sinh ngoài 8 phase gốc. Theo `rule.md` R2/R5: đã hỏi và user chốt qua câu
+> hỏi làm rõ trước khi làm. Đồng bộ thêm logic từ `pbl7-rag.ipynb` (bản cập nhật).
+
+### Tasks
+- [x] Backend: thêm filter `min_price` (`ChatFilters.min_price`, `_build_filter`, post-filter trong `retrieve_by_intent`)
+- [x] Frontend: `min_price` vào `Filters` interface + parse URL param (`useFilters.ts`)
+- [x] Frontend: slider "Giá tối thiểu" + cập nhật badge count (`FilterSidebar.tsx`)
+- [x] ~~auto-parse district/min_rating hard-filter~~ → REVERT: user chốt **soft boost**.
+      Gỡ `_extract_filters_from_query` + `_DISTRICT_SLUGS`; district/rating tự suy
+      ra từ câu hỏi chỉ tác động qua rerank, không lọc cứng (chỉ sidebar = hard).
+
+### Phase 9b — Sửa 4 vấn đề runtime (user báo khi chạy thật)
+- [x] #3a Fix `rerank.py`: so district bằng slug 2 phía (slugify_vn) — boost cũ chết do lệch dấu
+- [x] #3b Fix `retrieval.py`: gỡ auto district/rating hard-filter (→ soft qua rerank)
+- [x] #2 Tinh chỉnh tốc độ: context 8→5, content 300→160 (`pipeline.py`); `DEFAULT_MAX_TOKENS` 512→384, `MAX_HISTORY_TURNS` 3→2 (`config.py`); wire config vào `build_history_messages`
+- [x] #4 Fix mất tin nhắn: `useChat.ts` ghi stream thẳng vào query cache (meta seed user, done/abort ghi assistant), bỏ invalidate+setTimeout đua refetch; `useSessions.ts` `staleTime` 0→30s
+- [x] #1 "list nhanh" xác nhận KHÔNG phải bug (sources gửi trước token là cố ý)
+
+### Verification
+- [x] Frontend: `npx tsc --noEmit` → 0 error
+- [x] Backend: `python -m py_compile` các file đã sửa → OK
+- [ ] #3: "KS tốt nhất Đà Nẵng gần Sơn Trà" (no sidebar) → Sơn Trà được boost nhưng quận khác vẫn xuất hiện (cần GPU)
+- [ ] #3: sidebar district=Hải Châu → chỉ Hải Châu (explicit=hard) (cần GPU)
+- [ ] #4: chat mới + chat tiếp → tin nhắn không mất, reload còn đủ (cần backend GPU)
+- [ ] #2: câu trả lời gọn hơn, list source vẫn 10 mục, nhanh hơn ở lượt nhiều history (cần GPU)
+
+---
+
 ## Reference design decisions (rationale)
 
 | Quyết định | Lý do |

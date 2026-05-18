@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { streamSSE } from "@/lib/sse";
 import { normalizeNFC } from "@/lib/nfc";
 import type { Filters } from "./useFilters";
-import type { Message } from "./useSessions";
+import { upsertMessage } from "./useSessions";
 
 export type ChatStatus = "idle" | "streaming" | "waiting" | "error";
 
@@ -35,6 +35,40 @@ export function useChat(sessionId: string | null) {
       setStreamingMsg({ role: "assistant", content: "", sources: null, intent: null, isStreaming: true });
 
       let sessionIdUsed = currentSessionId;
+      let userMsgId: number | undefined;
+      let asstMsgId: number | undefined;
+      let curIntent: string | null = null;
+      let curSources: Record<string, unknown>[] | null = null;
+      let tokens = "";
+
+      // The stream is the source of truth — write it straight into the query
+      // cache so a remount/refetch can't blank the message before the backend
+      // commits it. Ids come from the backend `meta` event (always present).
+      const seedUserMessage = (sid: string) => {
+        if (userMsgId == null) return;
+        upsertMessage(qc, sid, {
+          id: userMsgId,
+          session_id: sid,
+          role: "user",
+          content: message,
+          sources: null,
+          intent: null,
+          created_at: Date.now(),
+        });
+      };
+
+      const writeAssistant = (finalContent: string) => {
+        if (!sessionIdUsed || asstMsgId == null) return;
+        upsertMessage(qc, sessionIdUsed, {
+          id: asstMsgId,
+          session_id: sessionIdUsed,
+          role: "assistant",
+          content: finalContent,
+          sources: curSources,
+          intent: curIntent,
+          created_at: Date.now(),
+        });
+      };
 
       try {
         const stream = streamSSE(
@@ -43,43 +77,17 @@ export function useChat(sessionId: string | null) {
           abortRef.current.signal,
         );
 
-        let tokens = "";
-
         for await (const event of stream) {
           switch (event.type) {
             case "meta": {
               const sid = event.data.session_id as string;
-              const userMsgId = event.data.user_message_id as number | undefined;
-              const asstMsgId = event.data.assistant_message_id as number | undefined;
+              userMsgId = event.data.user_message_id as number | undefined;
+              asstMsgId = event.data.assistant_message_id as number | undefined;
               if (sid !== sessionIdUsed) {
                 setCurrentSessionId(sid);
                 sessionIdUsed = sid;
-
-                // Optimistically seed messages cache so NewChat shows streaming immediately
-                qc.setQueryData<Message[]>(["messages", sid], (old) => {
-                  if (old && old.length > 0) return old;
-                  const now = Date.now();
-                  const userMsg: Message = {
-                    id: userMsgId ?? -1,
-                    session_id: sid,
-                    role: "user",
-                    content: message,
-                    sources: null,
-                    intent: null,
-                    created_at: now,
-                  };
-                  const asstMsg: Message = {
-                    id: asstMsgId ?? -1,
-                    session_id: sid,
-                    role: "assistant",
-                    content: "",
-                    sources: null,
-                    intent: null,
-                    created_at: now,
-                  };
-                  return [userMsg, asstMsg];
-                });
               }
+              seedUserMessage(sid);
               qc.invalidateQueries({ queryKey: ["sessions"] });
               break;
             }
@@ -87,20 +95,21 @@ export function useChat(sessionId: string | null) {
               setStatus("waiting");
               break;
             case "intent":
-              setStreamingMsg((prev) => prev ? { ...prev, intent: event.data.value as string } : prev);
+              curIntent = event.data.value as string;
+              setStreamingMsg((prev) => prev ? { ...prev, intent: curIntent } : prev);
               setStatus("streaming");
               break;
             case "sources":
-              setStreamingMsg((prev) =>
-                prev ? { ...prev, sources: event.data.items as Record<string, unknown>[] } : prev,
-              );
+              curSources = event.data.items as Record<string, unknown>[];
+              setStreamingMsg((prev) => prev ? { ...prev, sources: curSources } : prev);
               break;
             case "token":
               tokens += event.data.text as string;
               setStreamingMsg((prev) => prev ? { ...prev, content: tokens } : prev);
               break;
             case "done":
-              setStreamingMsg((prev) => prev ? { ...prev, isStreaming: false } : prev);
+              writeAssistant(tokens);
+              setStreamingMsg(null);
               break;
             case "error":
               throw new Error(event.data.message as string);
@@ -108,7 +117,8 @@ export function useChat(sessionId: string | null) {
         }
       } catch (err: unknown) {
         if ((err as Error)?.name === "AbortError") {
-          setStreamingMsg((prev) => prev ? { ...prev, content: prev.content || "(Đã dừng)", isStreaming: false } : prev);
+          writeAssistant(tokens || "(Đã dừng)");
+          setStreamingMsg(null);
         } else {
           const msg = (err as Error)?.message ?? "Lỗi không xác định";
           toast.error("Lỗi chat", { description: msg });
@@ -119,11 +129,8 @@ export function useChat(sessionId: string | null) {
       } finally {
         setStatus("idle");
         if (sessionIdUsed) {
-          qc.invalidateQueries({ queryKey: ["messages", sessionIdUsed] });
           qc.invalidateQueries({ queryKey: ["sessions"] });
         }
-        // Clear streaming message after persisted messages reload
-        setTimeout(() => setStreamingMsg(null), 300);
       }
     },
     [status, currentSessionId, qc],

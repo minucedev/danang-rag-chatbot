@@ -8,6 +8,7 @@ class ChatFilters(BaseModel):
     district: Optional[str] = None
     min_rating: Optional[float] = None
     max_price: Optional[float] = None
+    min_price: Optional[float] = None
 
 
 class ChatRequest(BaseModel):

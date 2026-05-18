@@ -33,7 +33,7 @@ def _format_context(results: List[SearchResultSchema]) -> str:
     if not results:
         return "Không có thông tin phù hợp với yêu cầu."
     parts = []
-    for i, r in enumerate(results[:8], 1):
+    for i, r in enumerate(results[:5], 1):
         lines = [f"[{i}] {r.get_display_name()}"]
         lines.append(f"   - Loại: {r.collection}")
         lines.append(f"   - Quận/Huyện: {r.district or 'Chưa có'}")
@@ -41,7 +41,7 @@ def _format_context(results: List[SearchResultSchema]) -> str:
         lines.append(f"   - Giá: {r.get_price_display()}")
         lines.append(f"   - Địa chỉ: {r.get_address_display()}")
         if r.content:
-            lines.append(f"   - Nội dung: {r.content[:300]}")
+            lines.append(f"   - Nội dung: {r.content[:160]}")
         if r.room_name:
             cap = f" (Sức chứa: {r.capacity} người)" if r.capacity else ""
             lines.append(f"   - Phòng: {r.room_name}{cap}")
@@ -74,7 +74,7 @@ def _build_messages(
 ### Trả lời:"""
 
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
-    messages.extend(build_history_messages(history))
+    messages.extend(build_history_messages(history, config.MAX_HISTORY_TURNS))
     messages.append({"role": "user", "content": user_prompt})
     return messages
 

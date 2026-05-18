@@ -16,6 +16,7 @@ export function FilterSidebar() {
   const activeCount =
     (filters.district ? 1 : 0) +
     (filters.min_rating ? 1 : 0) +
+    (filters.min_price ? 1 : 0) +
     (filters.max_price ? 1 : 0);
 
   return (
@@ -75,6 +76,21 @@ export function FilterSidebar() {
               min={0} max={10} step={0.5}
               value={[filters.min_rating ?? 0]}
               onValueChange={([v]) => setFilters({ min_rating: v > 0 ? v : undefined })}
+            />
+          </div>
+
+          {/* Min price */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-2">
+              Giá tối thiểu:{" "}
+              <span className="font-medium text-foreground">
+                {filters.min_price ? formatVND(filters.min_price) : "Không giới hạn"}
+              </span>
+            </p>
+            <Slider
+              min={0} max={10_000_000} step={100_000}
+              value={[filters.min_price ?? 0]}
+              onValueChange={([v]) => setFilters({ min_price: v > 0 ? v : undefined })}
             />
           </div>
 

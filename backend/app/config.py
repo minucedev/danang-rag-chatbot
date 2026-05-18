@@ -40,8 +40,8 @@ if HF_TOKEN:
 DB_PATH: str = os.getenv("DB_PATH", "data/chats.db")
 
 # Generation defaults
-DEFAULT_MAX_TOKENS: int = int(os.getenv("DEFAULT_MAX_TOKENS", "512"))
+DEFAULT_MAX_TOKENS: int = int(os.getenv("DEFAULT_MAX_TOKENS", "384"))
 DEFAULT_TEMPERATURE: float = float(os.getenv("DEFAULT_TEMPERATURE", "0.3"))
 DEFAULT_TOP_K: int = int(os.getenv("DEFAULT_TOP_K", "5"))
 SCORE_THRESHOLD: float = float(os.getenv("SCORE_THRESHOLD", "0.3"))
-MAX_HISTORY_TURNS: int = 3
+MAX_HISTORY_TURNS: int = 2

@@ -116,6 +116,8 @@ def _build_filter(filters: Optional[dict]) -> Optional[Filter]:
         conditions.append(FieldCondition(key="rating", range=Range(gte=float(filters["min_rating"]))))
     if filters.get("max_price"):
         conditions.append(FieldCondition(key="min_price_vnd", range=Range(lte=float(filters["max_price"]))))
+    if filters.get("min_price"):
+        conditions.append(FieldCondition(key="min_price_vnd", range=Range(gte=float(filters["min_price"]))))
     return Filter(must=conditions) if conditions else None
 
 
@@ -238,6 +240,10 @@ async def retrieve_by_intent(
         else:
             effective_filters["max_price"] = min(float(current_max), detected_max_price)
 
+    # District/rating auto-detected from free text are SOFT signals only —
+    # applied via rerank district/rating boosts, not as hard Qdrant filters.
+    # Only explicit sidebar filters (in `filters`) hard-filter here.
+
     collections = CollectionRegistry.get_collections_by_intent(intent)
 
     # Encode in executor (SentenceTransformer.encode is synchronous)
@@ -263,5 +269,16 @@ async def retrieve_by_intent(
             if key not in seen:
                 seen.add(key)
                 all_results.append(r)
+
+    # Fallback price filter: Qdrant Range silently skips records lacking the field.
+    # Asymmetry is intentional: an unknown price passes max_price (don't hide a
+    # possibly-cheap-enough result) but fails min_price (can't confirm the floor).
+    max_p = effective_filters.get("max_price")
+    if max_p is not None:
+        all_results = [r for r in all_results if r.min_price is None or r.min_price <= max_p]
+
+    min_p = effective_filters.get("min_price")
+    if min_p is not None:
+        all_results = [r for r in all_results if r.min_price is not None and r.min_price >= min_p]
 
     return all_results[:max_total]

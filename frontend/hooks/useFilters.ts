@@ -6,6 +6,7 @@ export interface Filters {
   district?: string;
   min_rating?: number;
   max_price?: number;
+  min_price?: number;
 }
 
 export function useFilters() {
@@ -17,6 +18,7 @@ export function useFilters() {
     district: params.get("district") ?? undefined,
     min_rating: params.has("min_rating") ? Number(params.get("min_rating")) : undefined,
     max_price: params.has("max_price") ? Number(params.get("max_price")) : undefined,
+    min_price: params.has("min_price") ? Number(params.get("min_price")) : undefined,
   };
 
   const setFilters = useCallback(

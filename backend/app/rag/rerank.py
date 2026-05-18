@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import List
 from app.rag.intent import QueryIntent, CollectionRegistry
 from app.rag.schemas import SearchResultSchema
-from app.utils.nfc import normalize_nfc
+from app.utils.slugify_vn import slugify_vn
 
 
 def rerank_results(
@@ -10,7 +10,7 @@ def rerank_results(
     query: str,
     intent: QueryIntent,
 ) -> List[SearchResultSchema]:
-    query_lower = normalize_nfc(query).lower()
+    q_slug = slugify_vn(query)
 
     for r in results:
         score = r.score
@@ -21,8 +21,8 @@ def rerank_results(
         if rating is not None:
             score += min(0.5, rating / 20)
 
-        # District match boost
-        if r.district and r.district.lower() in query_lower:
+        # District match boost (slug ↔ slug so diacritics don't break the match)
+        if r.district and slugify_vn(r.district) in q_slug:
             score += 0.15
 
         # Intent-specific boosts

@@ -1,6 +1,8 @@
 "use client";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiFetch, apiDelete } from "@/lib/api";
+
+const messagesKey = (sessionId: string | null) => ["messages", sessionId] as const;
 
 export interface Session {
   id: string;
@@ -48,10 +50,10 @@ export function useDeleteSession() {
 
 export function useMessagesQuery(sessionId: string | null) {
   return useQuery({
-    queryKey: ["messages", sessionId],
+    queryKey: messagesKey(sessionId),
     queryFn: () => apiFetch<Message[]>(`/api/sessions/${sessionId}/messages`),
     enabled: !!sessionId,
-    staleTime: 0,
+    staleTime: 30_000,
   });
 }
 
@@ -63,4 +65,20 @@ export interface Message {
   sources: Record<string, unknown>[] | null;
   intent: string | null;
   created_at: number;
+}
+
+// Upsert a message into the cached list owned by useMessagesQuery, keyed by id.
+// Replace-in-place when the id exists so repeat writes (e.g. abort after done)
+// stay idempotent instead of appending duplicates.
+export function upsertMessage(qc: QueryClient, sessionId: string, msg: Message) {
+  qc.setQueryData<Message[]>(messagesKey(sessionId), (old) => {
+    const list = old ?? [];
+    const idx = list.findIndex((m) => m.id === msg.id);
+    if (idx >= 0) {
+      const next = [...list];
+      next[idx] = msg;
+      return next;
+    }
+    return [...list, msg];
+  });
 }
