@@ -1,5 +1,4 @@
 from enum import Enum
-from app.utils.nfc import normalize_nfc
 from app import config
 
 
@@ -11,26 +10,7 @@ class QueryIntent(Enum):
     ROOM_SEARCH = "room_search"
     PRICE_SEARCH = "price_search"
     GENERAL = "general"
-
-    @classmethod
-    def detect(cls, query: str) -> "QueryIntent":
-        q = normalize_nfc(query).lower()
-
-        # Entity type keywords take priority over review/price keywords
-        # e.g. "khách sạn có đánh giá tốt" → HOTEL not REVIEW
-        if any(k in q for k in ["khách sạn", "hotel", "resort", "nghỉ dưỡng", "lưu trú"]):
-            return cls.HOTEL_SEARCH
-        if any(k in q for k in ["nhà hàng", "restaurant", "quán ăn", "ăn uống", "hải sản"]):
-            return cls.RESTAURANT_SEARCH
-        if any(k in q for k in ["địa điểm", "thắng cảnh", "tham quan", "du lịch", "bãi biển"]):
-            return cls.PLACE_SEARCH
-        if any(k in q for k in ["phòng", "room", "giường", "sức chứa", "capacity"]):
-            return cls.ROOM_SEARCH
-        if any(k in q for k in ["review", "đánh giá", "nhận xét", "comment", "chất lượng"]):
-            return cls.REVIEW_SEARCH
-        if any(k in q for k in ["giá", "price", "bao nhiêu", "chi phí", "budget"]):
-            return cls.PRICE_SEARCH
-        return cls.GENERAL
+    SPECIFIC_SEARCH = "specific_search"
 
     @property
     def display(self) -> str:
@@ -42,6 +22,7 @@ class QueryIntent(Enum):
             "room_search": "Phòng",
             "price_search": "Giá",
             "general": "Tổng quát",
+            "specific_search": "Địa điểm cụ thể",
         }
         return _map[self.value]
 
@@ -115,6 +96,8 @@ class CollectionRegistry:
             ]
         if intent == QueryIntent.PRICE_SEARCH:
             return [config.COLLECTION_ACCOMMODATION_HOTELS, config.COLLECTION_RESTAURANTS]
+        # SPECIFIC_SEARCH: entity type unknown, rewritten_query is the name —
+        # search the 3 primary collections (reviews/rooms add noise for "about X")
         # GENERAL
         return [
             config.COLLECTION_ACCOMMODATION_HOTELS,

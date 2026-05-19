@@ -1,6 +1,5 @@
 from __future__ import annotations
 import asyncio
-import re
 from typing import List, Optional
 
 from qdrant_client import AsyncQdrantClient
@@ -15,54 +14,6 @@ from app.utils.slugify_vn import slugify_vn
 
 # Per-request parent entity cache — reset between pipeline instances
 _parent_cache: dict[str, dict] = {}
-
-
-def _parse_number_token(token: str) -> Optional[float]:
-    raw = token.strip()
-    if not raw:
-        return None
-
-    # Handle common VN/EN numeric formats: 1.000.000 / 1,000,000 / 1,2
-    if "." in raw and "," in raw:
-        raw = raw.replace(".", "").replace(",", ".")
-    elif raw.count(".") > 1 or raw.count(",") > 1:
-        raw = raw.replace(".", "").replace(",", "")
-    elif "," in raw:
-        raw = raw.replace(",", ".")
-
-    try:
-        return float(raw)
-    except ValueError:
-        return None
-
-
-def _extract_max_price_from_query(query: str) -> Optional[float]:
-    """Extract upper budget (VND) from phrases like 'dưới 1 triệu', '< 1tr'."""
-    q = normalize_nfc(query).lower()
-
-    pattern = re.compile(
-        r"(?:duoi|dưới|<|<=|khong\s+qua|không\s+quá|toi\s+da|tối\s+đa|max|tro\s+xuong|trở\s+xuống)\s*"
-        r"([0-9]+(?:[\.,][0-9]+)*)\s*"
-        r"(trieu|triệu|tr|m|nghin|nghìn|ngan|ngàn|k)?"
-    )
-    m = pattern.search(q)
-    if not m:
-        return None
-
-    value = _parse_number_token(m.group(1))
-    if value is None:
-        return None
-
-    unit = (m.group(2) or "").strip()
-    if unit in {"trieu", "triệu", "tr", "m"}:
-        return value * 1_000_000
-    if unit in {"nghin", "nghìn", "ngan", "ngàn", "k"}:
-        return value * 1_000
-
-    # No explicit unit: if big enough, assume already VND.
-    if value >= 100_000:
-        return value
-    return None
 
 
 async def _fetch_parent_entity(
@@ -148,6 +99,36 @@ async def retrieve_from_collection(
                 continue
             payload = point.payload or {}
 
+            # Lọc thủ công (Đã tối ưu hóa logic khoảng giá)
+            skip = False
+            if filters:
+                min_price = payload.get("min_price_vnd")
+                max_price = payload.get("max_price_vnd")
+
+                # CHẶN TRẦN GIÁ (max_price)
+                if filters.get("max_price"):
+                    # Nếu giá thấp nhất của quán còn cao hơn cả mức khách chịu chi -> LOẠI thẳng
+                    if min_price and min_price > filters["max_price"]:
+                        skip = True
+                        print(f"  [DEBUG] {collection_name}: LOẠI {payload.get('entity_name') or payload.get('place_name')} - giá thấp nhất {min_price:,.0f} > trần {filters['max_price']:,.0f}")
+                    # [NÂNG CẤP AN TOÀN]: Nếu quán có giá tối đa vượt quá 1.5 lần mức khách muốn,
+                    # cũng loại luôn để tránh giới thiệu những nơi quá đắt đỏ so với túi tiền của họ.
+                    elif max_price and max_price > (filters["max_price"] * 1.5):
+                        skip = True
+                        print(f"  [DEBUG] {collection_name}: LOẠI {payload.get('entity_name') or payload.get('place_name')} - giá cao nhất {max_price:,.0f} quá cao so với trần {filters['max_price']:,.0f}")
+
+                # CHẶN SÀN GIÁ (min_price)
+                if filters.get("min_price") and not skip:
+                    # Nếu có giá cao nhất mà giá cao nhất lại thấp hơn mức sàn khách yêu cầu -> LOẠI
+                    if max_price and max_price < filters["min_price"]:
+                        skip = True
+                    # Hoặc nếu không có giá cao nhất, nhưng giá thấp nhất thấp hơn mức sàn -> LOẠI
+                    elif min_price and min_price < filters["min_price"]:
+                        skip = True
+
+            if skip:
+                continue
+
             def _float(v):
                 try:
                     return float(v) if v is not None else None
@@ -228,21 +209,9 @@ async def retrieve_by_intent(
     score_threshold: float = 0.3,
 ) -> List[SearchResultSchema]:
     q = normalize_nfc(query)
+    # Filter/giá suy luận đã do LLMQueryAnalyzer lo (pipeline truyền `filters`).
     if intent is None:
-        intent = QueryIntent.detect(q)
-
-    effective_filters = dict(filters or {})
-    detected_max_price = _extract_max_price_from_query(q)
-    if detected_max_price is not None:
-        current_max = effective_filters.get("max_price")
-        if current_max is None:
-            effective_filters["max_price"] = detected_max_price
-        else:
-            effective_filters["max_price"] = min(float(current_max), detected_max_price)
-
-    # District/rating auto-detected from free text are SOFT signals only —
-    # applied via rerank district/rating boosts, not as hard Qdrant filters.
-    # Only explicit sidebar filters (in `filters`) hard-filter here.
+        intent = QueryIntent.GENERAL
 
     collections = CollectionRegistry.get_collections_by_intent(intent)
 
@@ -255,7 +224,7 @@ async def retrieve_by_intent(
 
     # Retrieve from all collections in parallel
     tasks = [
-        retrieve_from_collection(col, query_vector, client, top_k_per_collection, effective_filters, score_threshold)
+        retrieve_from_collection(col, query_vector, client, top_k_per_collection, filters, score_threshold)
         for col in collections
     ]
     results_nested = await asyncio.gather(*tasks)
@@ -273,11 +242,13 @@ async def retrieve_by_intent(
     # Fallback price filter: Qdrant Range silently skips records lacking the field.
     # Asymmetry is intentional: an unknown price passes max_price (don't hide a
     # possibly-cheap-enough result) but fails min_price (can't confirm the floor).
-    max_p = effective_filters.get("max_price")
+    # Defense-in-depth trên manual skip ở từng collection — vẫn enforce min_price.
+    fdict = filters or {}
+    max_p = fdict.get("max_price")
     if max_p is not None:
         all_results = [r for r in all_results if r.min_price is None or r.min_price <= max_p]
 
-    min_p = effective_filters.get("min_price")
+    min_p = fdict.get("min_price")
     if min_p is not None:
         all_results = [r for r in all_results if r.min_price is not None and r.min_price >= min_p]
 

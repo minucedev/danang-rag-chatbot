@@ -16,6 +16,7 @@ export const INTENT_LABELS: Record<string, string> = {
   room_search: "Phòng",
   price_search: "Giá",
   general: "Tổng quát",
+  specific_search: "Địa điểm cụ thể",
 };
 
 export function intentLabel(value: string): string {

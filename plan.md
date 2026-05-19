@@ -314,6 +314,31 @@ Xây giao diện chatbot **hoàn chỉnh, polished, demo-ready** cho hệ thốn
 - [ ] B: "Khách sạn Mường Thanh có tốt không" → tập trung 1 nơi, ổn định lặp lại; "gợi ý KS 4 sao ở Sơn Trà" → vẫn TOP 3 (cần GPU)
 - [ ] B-edge: "ở Sơn Trà" (quận) không nhầm specific; hỏi nối tiếp sau 1 KS không nhầm specific (cần GPU)
 
+### Phase 9d — Đồng bộ kiến trúc notebook viết lại (LLM Query Analyzer)
+
+> User viết lại hẳn `pbl7-rag.ipynb`: bỏ rule-based intent + regex filter, thay
+> bằng `LLMQueryAnalyzer` (1 lượt LLM trước retrieve → `{intent, rewritten_query,
+> filters}`), +intent `specific_search`, rerank viết lại, prompt rẽ nhánh theo
+> intent. Đã hỏi làm rõ, user chốt: **(1)** full fidelity (port analyzer, bỏ
+> `detect`/regex giá/`find_specific_match` vừa ship `55e7297`); **(2)** GIỮ
+> multi-turn history (query enrich-history là input cho analyzer; history vẫn vào
+> LLM trả lời); **(3)** thay nhận diện specific bằng intent `specific_search`.
+
+- [x] `analyzer.py` MỚI: `LLMQueryAnalyzer(model, tokenizer)` — port verbatim CELL 5 (`_clean_price`, `analyze` few-shot → JSON, fallback `LLM_Fallback`)
+- [x] `intent.py`: +`SPECIFIC_SEARCH`/`.display`; xóa `detect()` + import `normalize_nfc`; `get_collections_by_intent(SPECIFIC_SEARCH)` → bộ GENERAL
+- [x] `rerank.py`: viết lại theo CELL 3 (mismatch penalty −0.8, rating theo review_count, tuning luxury); GIỮ district slug↔slug (+0.3, lệch notebook cố ý — bug diacritic 9b); xóa name-match + boost intent-specific/completeness
+- [x] `retrieval.py`: xóa `_extract_max_price_from_query`/`_parse_number_token`/`import re`/soft-inject; `intent=None→GENERAL`; port lọc giá thủ công (guard `max_price_vnd>max*1.5` + min_price reworked); GIỮ fallback price filter (đọc `filters`)
+- [x] `pipeline.py`: luồng mới enrich→`analyze` (run_in_executor)→retrieve(`rewritten`)→rerank→dedup→`_build_messages(intent)`→stream; helper `_merge_filters` (FE sidebar thắng, max_price `min()`) + `_dedup_by_display_name`
+- [x] `test_phase1.py`: xóa 6 assert `detect()`; +assert `SPECIFIC_SEARCH.display` + routing; `frontend/lib/format.ts`: +`specific_search` vào `INTENT_LABELS`
+
+### Verification 9d
+- [x] `python -m py_compile app/rag/analyzer.py app/rag/intent.py app/rag/rerank.py app/rag/retrieval.py app/rag/pipeline.py` → OK
+- [x] `python test_phase1.py` + `python test_phase2.py` → pass
+- [x] `cd frontend && npx tsc --noEmit` → 0 error
+- [x] Grep: hết `detect(`/`find_specific_match`/`_extract_max_price_from_query`/`NAME_MATCH_BOOST`/`parse_filters_from_query`
+- [ ] GPU: specific ("thông tin KS Sala Danang Beach Hotel") → badge "Địa điểm cụ thể", tập trung 1 nơi, không Top 3 (cần GPU)
+- [ ] GPU: list ("gợi ý KS 4 sao Sơn Trà có hồ bơi") → TOP 3; nối tiếp bám set cũ; sidebar filter thắng; fallback không crash; warmup OK (cần GPU)
+
 ---
 
 ## Reference design decisions (rationale)
@@ -324,6 +349,7 @@ Xây giao diện chatbot **hoàn chỉnh, polished, demo-ready** cho hệ thốn
 | SSE thay WebSocket | Chat unidirectional khi generation. SSE đơn giản hơn, browser auto-reconnect. |
 | `fetch` + `ReadableStream` thay `EventSource` | EventSource không POST được body. |
 | Heuristic context thay LLM rewriting | Qwen-3B 4-bit rewriting hay hallucinate entity. Cùng GPU → double TTFT. Heuristic deterministic, free. |
+| ~~Heuristic~~ → **LLM Query Analyzer** (Phase 9d) | **ĐẢO có chủ đích** theo lệnh user tường minh (rule.md R6 > plan.md): notebook prototype đã chuyển sang LLM analyzer cho intent/filter chính xác hơn. Chấp nhận +1 lượt generate (double TTFT) — đánh đổi tốc-độ-lấy-độ-chính-xác do user chốt. |
 | URL params cho filter thay Zustand | Shareable demo links, back-button work, ít state library hơn. |
 | AsyncQdrantClient thay ThreadPoolExecutor | Mixing thread + async block SSE flush. |
 | Gửi `sources` trước `token` | UI render citation cards trong khi LLM stream → cảm giác nhanh, "RAG-flavored". |

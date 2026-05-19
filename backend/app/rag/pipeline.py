@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import threading
 from typing import AsyncIterator, Optional, List
 
@@ -7,8 +8,9 @@ from sentence_transformers import SentenceTransformer
 
 from app import config
 from app.rag.intent import QueryIntent
+from app.rag.analyzer import LLMQueryAnalyzer
 from app.rag.retrieval import retrieve_by_intent
-from app.rag.rerank import rerank_results, find_specific_match
+from app.rag.rerank import rerank_results
 from app.rag.llm import generate_streaming
 from app.rag.memory import build_search_query, build_history_messages
 from app.rag.schemas import SearchResultSchema
@@ -49,20 +51,67 @@ def _format_context(results: List[SearchResultSchema]) -> str:
     return "\n\n".join(parts)
 
 
+def _merge_filters(fe: Optional[dict], llm: dict) -> dict:
+    """FE sidebar thắng theo từng field; analyzer chỉ điền field FE bỏ trống.
+
+    `max_price` lấy min() của 2 nguồn (ngân sách chặt nhất) — không hồi quy ca
+    sidebar-budget. FE là hành động tường minh; analyzer là suy luận có thể sai.
+    Chỉ set key có giá trị → `_build_filter` truth-test không đổi hành vi.
+    """
+    fe = fe or {}
+    merged: dict = {}
+    for key in ("district", "min_rating", "max_price", "min_price"):
+        fv = fe.get(key)
+        lv = llm.get(key)
+        if key == "max_price" and fv is not None and lv is not None:
+            merged[key] = min(float(fv), float(lv))
+        elif fv is not None:
+            merged[key] = fv
+        elif lv is not None:
+            merged[key] = lv
+    return merged
+
+
+def _dedup_by_display_name(
+    results: List[SearchResultSchema],
+) -> List[SearchResultSchema]:
+    """Gộp thực thể trùng tên: giữ bản đầu; nếu bản đang giữ thiếu `min_price`
+    mà bản trùng có thì thay."""
+    deduped: List[SearchResultSchema] = []
+    seen: dict[str, int] = {}
+    for r in results:
+        key = r.get_display_name().lower().strip()
+        if key not in seen:
+            seen[key] = len(deduped)
+            deduped.append(r)
+        else:
+            idx = seen[key]
+            if not deduped[idx].min_price and r.min_price:
+                deduped[idx] = r
+    return deduped
+
+
 def _build_messages(
     query: str,
     results: List[SearchResultSchema],
     history: list[dict],
-    specific: bool = False,
+    intent: QueryIntent,
 ) -> list[dict]:
     context = _format_context(results)
     empty_note = "" if results else "\nLưu ý: Không tìm thấy kết quả phù hợp. Hãy thông báo cho người dùng và gợi ý nới lỏng bộ lọc.\n"
 
-    guideline_2 = (
-        "2. Người dùng đang hỏi về một địa điểm cụ thể: trả lời tập trung vào [1] — nêu rõ đánh giá, giá, và các nhận xét nổi bật của nơi này; KHÔNG liệt kê các nơi khác trừ khi không có thông tin về nơi được hỏi."
-        if specific
-        else "2. Nếu có nhiều lựa chọn, đề xuất TOP 3 với rating và giá"
-    )
+    if intent == QueryIntent.SPECIFIC_SEARCH:
+        rules = """### QUY TẮC BẮT BUỘC KHI TRẢ LỜI (TUÂN THỦ TUYỆT ĐỐI):
+1. TRẢ LỜI ĐÚNG TRỌNG TÂM: Chỉ tập trung cung cấp đầy đủ thông tin (Địa chỉ, Đánh giá, Giá cả, Mô tả) của ĐÚNG địa điểm/khách sạn/nhà hàng được yêu cầu trong câu hỏi.
+2. TUYỆT ĐỐI KHÔNG GỢI Ý LUNG TUNG: Không liệt kê thêm các khách sạn/nhà hàng đối thủ khác mang tính chất so sánh hay đề xuất danh sách "Top 3". Người dùng chỉ cần thông tin của địa điểm họ hỏi.
+3. KHÔNG ẢO GIÁC: Chỉ dùng thông tin trong mục "Thông tin tham khảo". Không tự bịa ra thông tin nằm ngoài ngữ cảnh.
+4. XỬ LÝ KHI TRỐNG DỮ LIỆU: Nếu mục "Thông tin tham khảo" trống, hãy trả lời lịch sự: "Hiện hệ thống không tìm thấy thông tin của [tên địa điểm] trong cơ sở dữ liệu." """
+    else:
+        rules = """### QUY TẮC BẮT BUỘC KHI TRẢ LỜI (TUÂN THỦ TUYỆT ĐỐI):
+1. KHÔNG ẢO GIÁC: Chỉ được sử dụng thông tin được cung cấp trong mục "Thông tin tham khảo". KHÔNG TỰ Ý BỊA RA tên địa điểm, giá cả hoặc địa chỉ nằm ngoài ngữ cảnh trên.
+2. XỬ LÝ KHI THIẾU THÔNG TIN: Nếu mục "Thông tin tham khảo" bị trống hoặc ghi "KHÔNG CÓ DỮ LIỆU PHÙ HỢP", hãy trả lời lịch sự rằng: "Hiện tại hệ thống không tìm thấy kết quả nào thỏa mãn chính xác các tiêu chí của bạn trong cơ sở dữ liệu." Tuyệt đối không tự suy diễn thông tin bên ngoài.
+3. ĐỀ XUẤT PHÙ HỢP: Nếu dữ liệu có sẵn, hãy đề xuất tối đa TOP 3 lựa chọn phù hợp nhất, kèm theo Đánh giá (Rating), Giá cả và Địa chỉ rõ ràng.
+4. Giữ phong thái chuyên nghiệp, thân thiện và phản hồi hoàn toàn bằng tiếng Việt."""
 
     user_prompt = f"""{_FEW_SHOT}
 
@@ -72,11 +121,7 @@ def _build_messages(
 ### Thông tin tham khảo:
 {context}{empty_note}
 
-### Hướng dẫn:
-1. Trả lời bằng tiếng Việt, trực tiếp và chính xác
-{guideline_2}
-3. Nếu không có kết quả, nói rõ và gợi ý nới lỏng bộ lọc
-4. Không bịa thông tin ngoài dữ liệu đã cung cấp
+{rules}
 
 ### Trả lời:"""
 
@@ -98,6 +143,7 @@ class RAGPipeline:
         self.model = model
         self.tokenizer = tokenizer
         self.client = qdrant_client
+        self.analyzer = LLMQueryAnalyzer(model, tokenizer)
 
     async def answer_stream(
         self,
@@ -114,34 +160,37 @@ class RAGPipeline:
 
         q = normalize_nfc(query)
 
-        # 1. Build context-aware search query
+        # 1. Enrich query với lịch sử TRƯỚC (giữ multi-turn), rồi đưa vào
+        #    LLMQueryAnalyzer. Analyzer là 1 lượt generate blocking — chạy qua
+        #    run_in_executor để event loop rảnh cho disconnect-check + SSE ping.
         search_q = build_search_query(history, q)
-        # Detect intent from the raw user query to avoid context terms
-        # (e.g. previous "... Hotel") overriding the current intent.
-        intent = QueryIntent.detect(q)
+        loop = asyncio.get_running_loop()
+        analysis = await loop.run_in_executor(None, self.analyzer.analyze, search_q)
+        intent = analysis["intent"]
+        rewritten = analysis["rewritten_query"]
         yield {"type": "intent", "value": intent.value, "display": intent.display}
 
-        # 2. Retrieve
+        # 2. Trộn filter: FE sidebar thắng, analyzer điền field trống
+        merged = _merge_filters(filters, analysis["filters"])
+
+        # 3. Retrieve bằng rewritten_query rồi rerank + dedup
         results = await retrieve_by_intent(
-            query=search_q,
+            query=rewritten,
             client=self.client,
             encoder=self.encoder,
             intent=intent,
             top_k_per_collection=config.DEFAULT_TOP_K,
-            filters=filters,
+            filters=merged,
             score_threshold=config.SCORE_THRESHOLD,
         )
-        results = rerank_results(results, search_q, intent)
-        # Detect a specific-place lookup from the raw query `q`, NOT search_q:
-        # build_search_query appends prior-turn entity names that would
-        # false-trigger "specific" on follow-up questions.
-        specific_match = find_specific_match(results, q)
+        results = rerank_results(results, rewritten, intent)
+        results = _dedup_by_display_name(results)
 
         sources = [r.to_dict() for r in results[:10]]
         yield {"type": "sources", "items": sources, "total": len(sources)}
 
-        # 3. Build prompt and stream
-        messages = _build_messages(q, results, history, specific=specific_match is not None)
+        # 4. Build prompt (hiển thị q gốc cho UX) — rẽ nhánh theo intent
+        messages = _build_messages(q, results, history, intent)
 
         async for token in generate_streaming(
             messages,

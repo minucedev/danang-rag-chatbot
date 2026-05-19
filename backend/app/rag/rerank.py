@@ -1,39 +1,8 @@
 from __future__ import annotations
-from typing import List, Optional
+from typing import List
 from app.rag.intent import QueryIntent, CollectionRegistry
 from app.rag.schemas import SearchResultSchema
 from app.utils.slugify_vn import slugify_vn
-
-# Boost large enough to float a query-named place above the per-candidate
-# stack (rating .5 + district .15 + intent .25 + completeness .2).
-NAME_MATCH_BOOST = 0.6
-
-# Generic words stripped from an entity name before matching it to the query.
-# 'da'/'nang'/'danang' MUST stay here: every place ends in "Đà Nẵng", so
-# without stripping them the name core would substring-match almost any query.
-_GENERIC = {
-    "khach", "san", "nha", "hang", "quan", "hotel", "resort", "homestay",
-    "villa", "motel", "the", "khu", "nghi", "duong", "da", "nang", "danang",
-}
-
-# Recommendation/list cues (slugified, space-padded). Their presence means the
-# user wants a list, not a focused answer about one named place.
-_RECO_CUES = (
-    " goi y", " de xuat", " gioi thieu", " tot nhat", " danh sach", " liet ke",
-    " nao", " recommend", " list", " top ", " cac ", " nhung ", " o dau", " gan ",
-)
-
-
-def _name_matches(name: str, q_slug: str) -> bool:
-    """True if the entity's distinctive name (generics stripped) is in q_slug.
-
-    Contiguous substring on slug — data names are long official forms
-    ("Khách sạn Mường Thanh Luxury Đà Nẵng") while users type the short form.
-    Length guards (core ≥4 chars, ≥1 multi-char token) reject a too-short
-    leftover that would spuriously substring-match an unrelated query.
-    """
-    core = " ".join(t for t in slugify_vn(name).split() if t not in _GENERIC)
-    return len(core) >= 4 and any(len(t) >= 2 for t in core.split()) and core in q_slug
 
 
 def rerank_results(
@@ -41,68 +10,64 @@ def rerank_results(
     query: str,
     intent: QueryIntent,
 ) -> List[SearchResultSchema]:
-    q_slug = slugify_vn(query)
+    """Rerank results using multiple signals and strict keyword penalties.
 
-    for r in results:
-        score = r.score
-        score *= CollectionRegistry.get_weight(r.collection, intent)
-
-        # Rating boost (use parent rating for reviews)
-        rating = r.parent_rating or r.rating
-        if rating is not None:
-            score += min(0.5, rating / 20)
-
-        # District match boost (slug ↔ slug so diacritics don't break the match)
-        if r.district and slugify_vn(r.district) in q_slug:
-            score += 0.15
-
-        # Intent-specific boosts
-        if intent == QueryIntent.PRICE_SEARCH and r.min_price is not None:
-            score += 0.2
-        if intent == QueryIntent.ROOM_SEARCH and r.capacity is not None:
-            score += 0.25
-        if intent == QueryIntent.REVIEW_SEARCH and r.content:
-            score += min(0.2, len(r.content) / 1000)
-
-        # Completeness boost
-        info = 0.0
-        if rating is not None:
-            info += 0.05
-        if r.min_price is not None:
-            info += 0.05
-        if r.address:
-            info += 0.03
-        if r.district:
-            info += 0.03
-        score += min(0.2, info)
-
-        if _name_matches(r.get_display_name(), q_slug):
-            score += NAME_MATCH_BOOST
-
-        r.score = score
-
-    results.sort(key=lambda x: x.score, reverse=True)
-    return results
-
-
-def _has_reco_cue(q_slug: str) -> bool:
-    padded = f" {q_slug} "
-    return any(cue in padded for cue in _RECO_CUES)
-
-
-def find_specific_match(
-    results: List[SearchResultSchema], query: str
-) -> Optional[SearchResultSchema]:
-    """Return the place a 'specific lookup' query targets, else None.
-
-    None when the query carries a recommendation cue (user wants a list) or no
-    result's name appears in it. `results` must already be reranked, so the
-    name-boosted target is at the front.
+    One deliberate divergence from the validated prototype: the district boost
+    compares slug↔slug (slugify_vn) instead of raw
+    `district.lower() in query.lower()` — Phase 9b fixed a real diacritic
+    mismatch bug there; reverting would reintroduce it. Boost magnitude (0.3)
+    unchanged.
     """
+    query_lower = query.lower()
     q_slug = slugify_vn(query)
-    if _has_reco_cue(q_slug):
-        return None
-    for r in results:
-        if _name_matches(r.get_display_name(), q_slug):
-            return r
-    return None
+
+    # Định nghĩa các cặp từ khóa nhạy cảm để tránh hiện tượng "râu ông nọ cắm cằm bà kia"
+    mismatch_rules = {
+        "hải sản": ["gà rán", "burger", "lotteria", "jollibee", "pizza", "chè", "cafe", "coffee"],
+        "mì quảng": ["pizza", "cinema", "bar", "lounge", "buffet", "chè", "cafe", "coffee"],
+        "đồ nướng": ["bánh sầu riêng", "quán chay", "chè", "trà sữa", "cafe", "coffee"],
+        "khách sạn": ["homestay", "hostel", "dorm"],  # Nếu khách tìm khách sạn xịn, hạ bớt dorm/hostel
+    }
+
+    for result in results:
+        final_score = result.score
+        entity_name_lower = result.get_display_name().lower()
+
+        # 1. Áp dụng trọng số Collection dựa trên Intent
+        collection_weight = CollectionRegistry.get_weight(result.collection, intent)
+        final_score *= collection_weight
+
+        # 2. Boost điểm cho Quận/Huyện trùng khớp (Tăng mạnh từ 0.15 lên 0.3)
+        if result.district and slugify_vn(result.district) in q_slug:
+            final_score += 0.3
+
+        # 3. Boost điểm cho thực thể có Rating chất lượng (Dựa trên số lượng review)
+        rating_value = result.parent_rating if result.parent_rating else result.rating
+        review_count = result.review_count or 0
+        if rating_value is not None:
+            if review_count > 5:
+                final_score += min(0.4, rating_value / 20)
+            else:
+                final_score += min(0.15, rating_value / 40)  # Ít review thì boost ít tránh điểm ảo
+
+        # 4. CƠ CHẾ PHẠT (PENALTY) ĐỂ KHỬ NHIỄU VECTOR SEARCH
+        for key, bad_words in mismatch_rules.items():
+            if key in query_lower:
+                # Nếu câu hỏi chứa từ khóa cốt lõi (vd: hải sản) nhưng tên thực thể chứa từ lạc quẻ (vd: lotteria)
+                if any(word in entity_name_lower for word in bad_words):
+                    final_score -= 0.8  # Trừ điểm cực nặng để đẩy xuống đáy danh sách
+                    print(f"  [DEBUG RERANK] Hạ điểm phạt thực thể lệch ngành: {result.get_display_name()}")
+
+        # 5. Tối ưu cho nhu cầu tiếp đối tác / sang trọng
+        if "đối tác" in query_lower or "tiếp khách" in query_lower or "sang trọng" in query_lower:
+            if rating_value and rating_value < 7.5:
+                final_score -= 0.3
+            if "buffet" in entity_name_lower:
+                final_score -= 0.15
+
+        result.score = final_score
+
+    # Sắp xếp lại danh sách sau khi đã xử lý tất cả các chiều thông tin
+    results.sort(key=lambda x: x.score, reverse=True)
+
+    return results

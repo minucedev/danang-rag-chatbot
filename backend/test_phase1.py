@@ -19,18 +19,14 @@ print("utils: OK")
 # --- intent ---
 from app.rag.intent import QueryIntent, CollectionRegistry
 
-assert QueryIntent.detect("Khách sạn ở Sơn Trà") == QueryIntent.HOTEL_SEARCH
-assert QueryIntent.detect("Nhà hàng hải sản ngon") == QueryIntent.RESTAURANT_SEARCH
-assert QueryIntent.detect("Địa điểm du lịch nổi tiếng") == QueryIntent.PLACE_SEARCH
-# Entity type wins over review/price keywords
-assert QueryIntent.detect("Khách sạn có đánh giá tốt") == QueryIntent.HOTEL_SEARCH
-# 'phòng' triggers ROOM before PRICE — correct priority
-assert QueryIntent.detect("Giá phòng bao nhiêu") == QueryIntent.ROOM_SEARCH
-# 'du lịch' triggers PLACE before PRICE — correct priority
-assert QueryIntent.detect("Chi phí 3 ngày 2 đêm") == QueryIntent.PRICE_SEARCH
 assert QueryIntent.HOTEL_SEARCH.display == "Khách sạn"
 assert QueryIntent.RESTAURANT_SEARCH.display == "Nhà hàng"
 assert QueryIntent.PLACE_SEARCH.display == "Địa điểm"
+assert QueryIntent.SPECIFIC_SEARCH.display == "Địa điểm cụ thể"
+# SPECIFIC_SEARCH routes to the GENERAL collection set (entity type unknown)
+assert set(CollectionRegistry.get_collections_by_intent(QueryIntent.SPECIFIC_SEARCH)) == set(
+    CollectionRegistry.get_collections_by_intent(QueryIntent.GENERAL)
+)
 
 # CollectionRegistry intent routing
 hotel_cols = CollectionRegistry.get_collections_by_intent(QueryIntent.HOTEL_SEARCH)
