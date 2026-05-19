@@ -8,7 +8,7 @@ from sentence_transformers import SentenceTransformer
 from app import config
 from app.rag.intent import QueryIntent
 from app.rag.retrieval import retrieve_by_intent
-from app.rag.rerank import rerank_results
+from app.rag.rerank import rerank_results, find_specific_match
 from app.rag.llm import generate_streaming
 from app.rag.memory import build_search_query, build_history_messages
 from app.rag.schemas import SearchResultSchema
@@ -33,7 +33,7 @@ def _format_context(results: List[SearchResultSchema]) -> str:
     if not results:
         return "Không có thông tin phù hợp với yêu cầu."
     parts = []
-    for i, r in enumerate(results[:5], 1):
+    for i, r in enumerate(results[:8], 1):
         lines = [f"[{i}] {r.get_display_name()}"]
         lines.append(f"   - Loại: {r.collection}")
         lines.append(f"   - Quận/Huyện: {r.district or 'Chưa có'}")
@@ -41,7 +41,7 @@ def _format_context(results: List[SearchResultSchema]) -> str:
         lines.append(f"   - Giá: {r.get_price_display()}")
         lines.append(f"   - Địa chỉ: {r.get_address_display()}")
         if r.content:
-            lines.append(f"   - Nội dung: {r.content[:160]}")
+            lines.append(f"   - Nội dung: {r.content[:300]}")
         if r.room_name:
             cap = f" (Sức chứa: {r.capacity} người)" if r.capacity else ""
             lines.append(f"   - Phòng: {r.room_name}{cap}")
@@ -53,9 +53,16 @@ def _build_messages(
     query: str,
     results: List[SearchResultSchema],
     history: list[dict],
+    specific: bool = False,
 ) -> list[dict]:
     context = _format_context(results)
     empty_note = "" if results else "\nLưu ý: Không tìm thấy kết quả phù hợp. Hãy thông báo cho người dùng và gợi ý nới lỏng bộ lọc.\n"
+
+    guideline_2 = (
+        "2. Người dùng đang hỏi về một địa điểm cụ thể: trả lời tập trung vào [1] — nêu rõ đánh giá, giá, và các nhận xét nổi bật của nơi này; KHÔNG liệt kê các nơi khác trừ khi không có thông tin về nơi được hỏi."
+        if specific
+        else "2. Nếu có nhiều lựa chọn, đề xuất TOP 3 với rating và giá"
+    )
 
     user_prompt = f"""{_FEW_SHOT}
 
@@ -67,7 +74,7 @@ def _build_messages(
 
 ### Hướng dẫn:
 1. Trả lời bằng tiếng Việt, trực tiếp và chính xác
-2. Nếu có nhiều lựa chọn, đề xuất TOP 3 với rating và giá
+{guideline_2}
 3. Nếu không có kết quả, nói rõ và gợi ý nới lỏng bộ lọc
 4. Không bịa thông tin ngoài dữ liệu đã cung cấp
 
@@ -125,12 +132,16 @@ class RAGPipeline:
             score_threshold=config.SCORE_THRESHOLD,
         )
         results = rerank_results(results, search_q, intent)
+        # Detect a specific-place lookup from the raw query `q`, NOT search_q:
+        # build_search_query appends prior-turn entity names that would
+        # false-trigger "specific" on follow-up questions.
+        specific_match = find_specific_match(results, q)
 
         sources = [r.to_dict() for r in results[:10]]
         yield {"type": "sources", "items": sources, "total": len(sources)}
 
         # 3. Build prompt and stream
-        messages = _build_messages(q, results, history)
+        messages = _build_messages(q, results, history, specific=specific_match is not None)
 
         async for token in generate_streaming(
             messages,

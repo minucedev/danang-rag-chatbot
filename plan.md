@@ -285,7 +285,7 @@ Xây giao diện chatbot **hoàn chỉnh, polished, demo-ready** cho hệ thốn
 ### Phase 9b — Sửa 4 vấn đề runtime (user báo khi chạy thật)
 - [x] #3a Fix `rerank.py`: so district bằng slug 2 phía (slugify_vn) — boost cũ chết do lệch dấu
 - [x] #3b Fix `retrieval.py`: gỡ auto district/rating hard-filter (→ soft qua rerank)
-- [x] #2 Tinh chỉnh tốc độ: context 8→5, content 300→160 (`pipeline.py`); `DEFAULT_MAX_TOKENS` 512→384, `MAX_HISTORY_TURNS` 3→2 (`config.py`); wire config vào `build_history_messages`
+- [x] ~~#2 Tinh chỉnh tốc độ: context 8→5, content 300→160; `DEFAULT_MAX_TOKENS` 512→384~~ → REVERT ở 9c (hại chất lượng). Giữ lại: `MAX_HISTORY_TURNS` 3→2 + wire config vào `build_history_messages`
 - [x] #4 Fix mất tin nhắn: `useChat.ts` ghi stream thẳng vào query cache (meta seed user, done/abort ghi assistant), bỏ invalidate+setTimeout đua refetch; `useSessions.ts` `staleTime` 0→30s
 - [x] #1 "list nhanh" xác nhận KHÔNG phải bug (sources gửi trước token là cố ý)
 
@@ -296,6 +296,23 @@ Xây giao diện chatbot **hoàn chỉnh, polished, demo-ready** cho hệ thốn
 - [ ] #3: sidebar district=Hải Châu → chỉ Hải Châu (explicit=hard) (cần GPU)
 - [ ] #4: chat mới + chat tiếp → tin nhắn không mất, reload còn đủ (cần backend GPU)
 - [ ] #2: câu trả lời gọn hơn, list source vẫn 10 mục, nhanh hơn ở lượt nhiều history (cần GPU)
+
+### Phase 9c — Khôi phục về Colab + nhánh prompt "địa điểm cụ thể"
+
+> User báo khi chạy: cắt giảm tốc độ #2 làm câu trả lời mỏng/không tốt; hỏi 1
+> khách sạn cụ thể lúc trả thẳng lúc xổ cả danh sách. Đã hỏi làm rõ, user chốt:
+> khôi phục đầy đủ về Colab, GIỮ history+few-shot, fix specific đầy đủ.
+
+- [x] A: REVERT cắt giảm #2 về đúng Colab — `pipeline.py` context 5→8, content 160→300; `config.py` `DEFAULT_MAX_TOKENS` 384→512, `DEFAULT_TEMPERATURE` 0.3→0.2. GIỮ `repetition_penalty=1.1`, history (`MAX_HISTORY_TURNS=2`)+few-shot — lệch Colab cố ý (chống lặp / hỏi nối tiếp, không phải nguyên nhân regression)
+- [x] B: `rerank.py` — boost trùng tên riêng (`NAME_MATCH_BOOST=0.6`, `_name_matches` so slug 2 phía, `_GENERIC` có "da/nang/danang") + `_has_reco_cue` + `find_specific_match`
+- [x] B: `pipeline.py` — `_build_messages(..., specific)` đổi chỉ thị #2 (cụ thể→tập trung [1] kèm rating/giá/nhận xét; chung→TOP 3); `answer_stream` gọi `find_specific_match(results, q)` dùng `q` thô (không `search_q` để tránh false-trigger lượt nối tiếp)
+
+### Verification 9c
+- [x] `python -m py_compile app/config.py app/rag/pipeline.py app/rag/rerank.py` → OK
+- [x] `python test_phase1.py` → pass (utils/intent/memory/schemas OK)
+- [ ] A: câu hỏi chi tiết → trả lời dày hơn rõ (context 8, ~300 ký tự/nguồn, ~512 token); source cards vẫn 10 (cần GPU)
+- [ ] B: "Khách sạn Mường Thanh có tốt không" → tập trung 1 nơi, ổn định lặp lại; "gợi ý KS 4 sao ở Sơn Trà" → vẫn TOP 3 (cần GPU)
+- [ ] B-edge: "ở Sơn Trà" (quận) không nhầm specific; hỏi nối tiếp sau 1 KS không nhầm specific (cần GPU)
 
 ---
 
