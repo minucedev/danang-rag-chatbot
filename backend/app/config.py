@@ -28,8 +28,11 @@ ALL_COLLECTIONS = [
 
 # Models
 EMBED_MODEL_NAME: str = os.getenv("EMBED_MODEL_NAME", "BAAI/bge-m3")
-LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "Qwen/Qwen2.5-3B-Instruct")
-USE_4BIT: bool = os.getenv("USE_4BIT", "true").lower() == "true"
+
+# llama.cpp GGUF
+LLM_GGUF_PATH: str = os.getenv("LLM_GGUF_PATH", "models/qwen2.5-3b-instruct-q4_k_m.gguf")
+LLM_N_CTX: int = int(os.getenv("LLM_N_CTX", "4096"))
+LLM_N_GPU_LAYERS: int = int(os.getenv("LLM_N_GPU_LAYERS", "-1"))
 
 # HuggingFace
 HF_TOKEN: str | None = os.getenv("HF_TOKEN")

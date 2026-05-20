@@ -6,6 +6,7 @@ from typing import AsyncIterator, Optional, List
 
 from qdrant_client import AsyncQdrantClient
 from sentence_transformers import SentenceTransformer
+from llama_cpp import Llama
 
 from app import config
 from app.rag.intent import QueryIntent
@@ -136,15 +137,13 @@ class RAGPipeline:
     def __init__(
         self,
         encoder: SentenceTransformer,
-        model,
-        tokenizer,
+        llm: Llama,
         qdrant_client: AsyncQdrantClient,
     ) -> None:
         self.encoder = encoder
-        self.model = model
-        self.tokenizer = tokenizer
+        self.llm = llm
         self.client = qdrant_client
-        self.analyzer = LLMQueryAnalyzer(model, tokenizer)
+        self.analyzer = LLMQueryAnalyzer(llm)
 
     async def answer_stream(
         self,
@@ -210,16 +209,15 @@ class RAGPipeline:
 
         # 4. Build prompt (hiển thị q gốc cho UX) — rẽ nhánh theo intent
         messages = _build_messages(q, results, history, intent)
-        prompt_tokens = sum(len(self.tokenizer.encode(m["content"])) for m in messages)
-        print(f"[TIMING] prompt_built: {prompt_tokens} tokens (will be prefilled)")
+        prompt_chars = sum(len(m["content"]) for m in messages)
+        print(f"[TIMING] prompt_built: {prompt_chars} chars across {len(messages)} msgs")
 
         t_before_gen = time.perf_counter()
         first_token_logged = False
         token_count = 0
         async for token in generate_streaming(
             messages,
-            self.model,
-            self.tokenizer,
+            self.llm,
             stop_event,
             max_new_tokens=max_new_tokens,
             temperature=temperature,

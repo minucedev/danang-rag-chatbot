@@ -57,6 +57,16 @@ async def _fetch_parent_entity(
     return None
 
 
+def _norm_tags(v):
+    if v is None:
+        return None
+    if isinstance(v, list):
+        return v
+    if isinstance(v, str):
+        return [t.strip() for t in v.split(";") if t.strip()]
+    return None
+
+
 def _build_filter(filters: Optional[dict]) -> Optional[Filter]:
     if not filters:
         return None
@@ -167,7 +177,7 @@ async def retrieve_from_collection(
                 check_out_time=payload.get("check_out_time"),
                 time_open=payload.get("time_open"),
                 time_close=payload.get("time_close"),
-                tags=payload.get("tags"),
+                tags=_norm_tags(payload.get("tags")),
                 review_count=_int(payload.get("review_count")),
                 star_rating=_float(payload.get("star_rating")),
                 price_level=payload.get("price_level"),

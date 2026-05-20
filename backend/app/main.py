@@ -9,7 +9,7 @@ from sentence_transformers import SentenceTransformer
 
 from app import config
 from app.db import sessions as db
-from app.rag.llm import load_model_and_tokenizer
+from app.rag.llm import load_llm
 from app.rag.pipeline import RAGPipeline
 import app.rag.pipeline as pl_module
 
@@ -25,13 +25,13 @@ async def lifespan(app: FastAPI):
         device="cuda" if torch.cuda.is_available() else "cpu",
     )
 
-    print("Loading LLM...")
-    model, tokenizer = load_model_and_tokenizer(config.LLM_MODEL_NAME, config.USE_4BIT)
+    print("Loading LLM (llama.cpp)...")
+    llm = load_llm()
 
     print("Connecting to Qdrant...")
     qdrant = AsyncQdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY, timeout=60)
 
-    pipeline = RAGPipeline(encoder=encoder, model=model, tokenizer=tokenizer, qdrant_client=qdrant)
+    pipeline = RAGPipeline(encoder=encoder, llm=llm, qdrant_client=qdrant)
     pl_module._pipeline_instance = pipeline
 
     print("Initializing database...")

@@ -3,23 +3,20 @@ import json
 import re
 from typing import Optional
 
-import torch
-
 from app.rag.intent import QueryIntent
 
 
 class LLMQueryAnalyzer:
-    """LLM-based query analysis (ported verbatim from notebook CELL 5).
+    """LLM-based query analysis via llama.cpp.
 
     One greedy LLM pass before retrieval → {intent, rewritten_query, filters}.
-    `analyze` is intentionally synchronous/blocking exactly like the notebook;
-    the caller (pipeline.answer_stream) runs it via loop.run_in_executor so the
-    asyncio event loop stays free for disconnect checks / SSE heartbeat.
+    `analyze` is intentionally synchronous/blocking — the caller
+    (pipeline.answer_stream) runs it via loop.run_in_executor so the asyncio
+    event loop stays free for disconnect checks / SSE heartbeat.
     """
 
-    def __init__(self, model, tokenizer) -> None:
-        self.model = model
-        self.tokenizer = tokenizer
+    def __init__(self, llm) -> None:
+        self.llm = llm
 
     def _clean_price(self, value) -> Optional[int]:
         """Xử lý và chuẩn hóa mọi định dạng số tiền từ LLM về VND"""
@@ -152,30 +149,14 @@ Trả về JSON:"""
         ]
 
         try:
-            if hasattr(self.tokenizer, "apply_chat_template"):
-                model_inputs = self.tokenizer.apply_chat_template(
-                    messages,
-                    add_generation_prompt=True,
-                    return_tensors="pt",
-                    return_dict=True
-                )
-            else:
-                prompt_text = f"System: {messages[0]['content']}\nUser: {messages[1]['content']}\nAssistant:"
-                model_inputs = self.tokenizer(prompt_text, return_tensors="pt", return_dict=True)
-
-            model_inputs = {k: v.to(self.model.device) for k, v in model_inputs.items()}
-            prompt_len = model_inputs["input_ids"].shape[-1]
-
-            with torch.no_grad():
-                output_ids = self.model.generate(
-                    **model_inputs,
-                    max_new_tokens=256,
-                    do_sample=False,
-                    pad_token_id=self.tokenizer.eos_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id
-                )
-
-            gen_text = self.tokenizer.decode(output_ids[0][prompt_len:], skip_special_tokens=True).strip()
+            completion = self.llm.create_chat_completion(
+                messages=messages,
+                max_tokens=256,
+                temperature=0.0,
+                top_p=1.0,
+                stream=False,
+            )
+            gen_text = completion["choices"][0]["message"]["content"].strip()
 
             # Khử nhiễu văn bản bọc ngoài JSON
             json_match = re.search(r'\{.*\}', gen_text, re.DOTALL)
