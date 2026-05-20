@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import time
 from typing import List, Optional
 
 from qdrant_client import AsyncQdrantClient
@@ -217,17 +218,26 @@ async def retrieve_by_intent(
 
     # Encode in executor (SentenceTransformer.encode is synchronous)
     loop = asyncio.get_running_loop()
+    t_enc_start = time.perf_counter()
     query_vector: List[float] = await loop.run_in_executor(
         None,
         lambda: encoder.encode([q], normalize_embeddings=True)[0].tolist(),
     )
+    t_enc = time.perf_counter()
+    print(f"[TIMING]   encoder.encode: {(t_enc - t_enc_start)*1000:.0f}ms "
+          f"(device={getattr(encoder, 'device', 'unknown')})")
 
     # Retrieve from all collections in parallel
     tasks = [
         retrieve_from_collection(col, query_vector, client, top_k_per_collection, filters, score_threshold)
         for col in collections
     ]
+    t_qd_start = time.perf_counter()
     results_nested = await asyncio.gather(*tasks)
+    t_qd = time.perf_counter()
+    total_hits = sum(len(b) for b in results_nested)
+    print(f"[TIMING]   qdrant.gather: {(t_qd - t_qd_start)*1000:.0f}ms "
+          f"({len(collections)} cols, {total_hits} raw hits)")
 
     # Flatten + dedup by (collection, point_id)
     seen: set[tuple[str, str]] = set()

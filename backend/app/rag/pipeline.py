@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import threading
+import time
 from typing import AsyncIterator, Optional, List
 
 from qdrant_client import AsyncQdrantClient
@@ -158,14 +159,24 @@ class RAGPipeline:
         if stop_event is None:
             stop_event = threading.Event()
 
+        # [TIMING] instrumentation — tạm thời, sẽ xóa sau khi xong tối ưu
+        t_start = time.perf_counter()
+
         q = normalize_nfc(query)
 
         # 1. Enrich query với lịch sử TRƯỚC (giữ multi-turn), rồi đưa vào
         #    LLMQueryAnalyzer. Analyzer là 1 lượt generate blocking — chạy qua
         #    run_in_executor để event loop rảnh cho disconnect-check + SSE ping.
         search_q = build_search_query(history, q)
+        t_history = time.perf_counter()
+        print(f"[TIMING] history_enrich: {(t_history - t_start)*1000:.0f}ms")
+
         loop = asyncio.get_running_loop()
         analysis = await loop.run_in_executor(None, self.analyzer.analyze, search_q)
+        t_analyzer = time.perf_counter()
+        print(f"[TIMING] analyzer: {(t_analyzer - t_history)*1000:.0f}ms "
+              f"(source={analysis['source']}, intent={analysis['intent'].value})")
+
         intent = analysis["intent"]
         rewritten = analysis["rewritten_query"]
         yield {"type": "intent", "value": intent.value, "display": intent.display}
@@ -174,6 +185,7 @@ class RAGPipeline:
         merged = _merge_filters(filters, analysis["filters"])
 
         # 3. Retrieve bằng rewritten_query rồi rerank + dedup
+        t_retrieve_start = time.perf_counter()
         results = await retrieve_by_intent(
             query=rewritten,
             client=self.client,
@@ -183,15 +195,27 @@ class RAGPipeline:
             filters=merged,
             score_threshold=config.SCORE_THRESHOLD,
         )
+        t_retrieve = time.perf_counter()
+        print(f"[TIMING] retrieve_total: {(t_retrieve - t_retrieve_start)*1000:.0f}ms "
+              f"({len(results)} hits)")
+
         results = rerank_results(results, rewritten, intent)
         results = _dedup_by_display_name(results)
+        t_rerank = time.perf_counter()
+        print(f"[TIMING] rerank+dedup: {(t_rerank - t_retrieve)*1000:.0f}ms "
+              f"(-> {len(results)} after dedup)")
 
         sources = [r.to_dict() for r in results[:10]]
         yield {"type": "sources", "items": sources, "total": len(sources)}
 
         # 4. Build prompt (hiển thị q gốc cho UX) — rẽ nhánh theo intent
         messages = _build_messages(q, results, history, intent)
+        prompt_tokens = sum(len(self.tokenizer.encode(m["content"])) for m in messages)
+        print(f"[TIMING] prompt_built: {prompt_tokens} tokens (will be prefilled)")
 
+        t_before_gen = time.perf_counter()
+        first_token_logged = False
+        token_count = 0
         async for token in generate_streaming(
             messages,
             self.model,
@@ -200,7 +224,20 @@ class RAGPipeline:
             max_new_tokens=max_new_tokens,
             temperature=temperature,
         ):
+            if not first_token_logged:
+                t_first = time.perf_counter()
+                print(f"[TIMING] prefill+first_token: {(t_first - t_before_gen)*1000:.0f}ms")
+                print(f"[TIMING] >>> TTFT (total to first token): {(t_first - t_start)*1000:.0f}ms")
+                first_token_logged = True
+            token_count += 1
             yield {"type": "token", "text": token}
+
+        t_done = time.perf_counter()
+        gen_dur = t_done - t_before_gen
+        tok_per_s = token_count / gen_dur if gen_dur > 0 else 0
+        print(f"[TIMING] generation: {gen_dur*1000:.0f}ms "
+              f"({token_count} tokens, {tok_per_s:.1f} tok/s)")
+        print(f"[TIMING] === TOTAL: {(t_done - t_start)*1000:.0f}ms ===")
 
         yield {"type": "done"}
 
