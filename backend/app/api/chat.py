@@ -3,6 +3,7 @@ import asyncio
 import json
 import threading
 import time
+import uuid
 from typing import AsyncIterator
 
 from fastapi import APIRouter, Request
@@ -65,6 +66,8 @@ async def _event_stream(
     answer_tokens: list[str] = []
     intent_value: str | None = None
     sources_data: list[dict] = []
+    fallback_used: bool = False
+    error_flag: bool = False
 
     try:
         # Wait for lock — notify frontend if another request is ahead
@@ -101,32 +104,69 @@ async def _event_stream(
                         "total": event.get("total", 0),
                     })}
 
+                elif etype == "fallback":
+                    fallback_used = True
+                    yield {"event": "fallback", "data": json.dumps({
+                        "reason": event.get("reason"),
+                        "provider": event.get("provider"),
+                        "model": event.get("model"),
+                    })}
+
                 elif etype == "token":
                     token = event.get("text", "")
                     answer_tokens.append(token)
                     yield {"event": "token", "data": json.dumps({"text": token})}
+
+                elif etype == "error":
+                    # Pipeline-internal error (vd Gemini fail giữa chừng). Forward
+                    # nguyên message; KHÔNG set stop_event để không cản `done` ngay sau.
+                    yield {"event": "error", "data": json.dumps({
+                        "message": event.get("message", "Lỗi không xác định"),
+                    })}
 
                 elif etype == "done":
                     yield {"event": "done", "data": json.dumps({"finish_reason": "stop"})}
 
     except Exception as exc:
         stop_event.set()
-        yield {"event": "error", "data": json.dumps({"message": str(exc)})}
+        error_flag = True
+        # Tracked error: trả về error_id cho user, log đầy đủ phía server (không
+        # leak `str(exc)` cho client — exception text có thể chứa path/stack-trace).
+        err_id = uuid.uuid4().hex[:8]
+        print(f"[chat-stream] error_id={err_id} {type(exc).__name__}: {exc}")
+        yield {"event": "error", "data": json.dumps({
+            "message": f"Lỗi xử lý (id={err_id})",
+            "error_id": err_id,
+        })}
 
     finally:
-        # Persist final answer regardless of abort
+        # Persist final answer regardless of abort. KHÔNG để DB write làm crash
+        # SSE response — wrap try/except và log nếu fail.
         full_answer = "".join(answer_tokens)
         if not full_answer and stop_event.is_set():
             full_answer = "(Đã dừng)"
-        await db.update_message_content(asst_msg_id, full_answer)
+        # Intent ưu tiên: error > gemini_fallback > intent gốc từ analyzer.
+        # Để reload conversation không bị lừa rằng answer crashed là answer hoàn chỉnh.
+        if error_flag:
+            persisted_intent = "error"
+        elif fallback_used:
+            persisted_intent = "gemini_fallback"
+        else:
+            persisted_intent = intent_value
 
-        # Persist sources_json on the assistant message
-        if sources_data:
-            await db._db_conn().execute(
-                "UPDATE messages SET sources_json = ?, intent = ? WHERE id = ?",
-                (json.dumps(sources_data), intent_value, asst_msg_id),
+        try:
+            await db.update_message_content(asst_msg_id, full_answer)
+            if sources_data or fallback_used or error_flag:
+                await db._db_conn().execute(
+                    "UPDATE messages SET sources_json = ?, intent = ? WHERE id = ?",
+                    (json.dumps(sources_data), persisted_intent, asst_msg_id),
+                )
+                await db._db_conn().commit()
+        except Exception as persist_exc:
+            print(
+                f"[chat-stream] persist failed: "
+                f"{type(persist_exc).__name__}: {persist_exc}"
             )
-            await db._db_conn().commit()
 
 
 @router.post("/api/chat/stream")

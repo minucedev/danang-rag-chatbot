@@ -16,3 +16,9 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS profiles (
+    session_id   TEXT    PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    profile_json TEXT    NOT NULL,
+    updated_at   INTEGER NOT NULL
+);

@@ -1,6 +1,8 @@
 from __future__ import annotations
-from typing import Optional, List, Any
-from pydantic import BaseModel, Field
+from datetime import date
+from typing import Optional, List, Any, Literal
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.alias_generators import to_camel
 from app import config
 
 
@@ -109,3 +111,95 @@ class SessionEntity(BaseModel):
     title: str
     created_at: int
     updated_at: int
+
+
+# ─── Recommend / user profile (ported from PBL_ lấy dữ liệu) ───────────────
+
+Interest = Literal[
+    "beach", "food", "cafe", "culture", "nightlife", "family", "adventure", "shopping"
+]
+Companions = Literal["solo", "couple", "family", "friends", "business"]
+BudgetLevel = Literal["low", "mid", "high"]
+Language = Literal["vi", "en"]
+
+# Mỗi model "user-facing" mới đều dùng cùng config: nhận camelCase từ frontend (PBL
+# convention) hoặc snake_case (legacy), và serialize ra camelCase khi route có
+# `response_model_by_alias=True`. Không áp lên ChatRequest/SessionEntity/SearchResultSchema
+# để giữ tương thích cho chat.py + sessions API hiện có.
+_CAMEL_CONFIG = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class TripDates(BaseModel):
+    model_config = _CAMEL_CONFIG
+
+    start: date
+    end: date
+
+    @model_validator(mode="after")
+    def _check_order(self):
+        if self.end < self.start:
+            raise ValueError("trip_dates.end must be >= trip_dates.start")
+        return self
+
+    @property
+    def length_days(self) -> int:
+        return (self.end - self.start).days + 1
+
+
+class UserProfile(BaseModel):
+    model_config = _CAMEL_CONFIG
+
+    display_name: Optional[str] = Field(None, max_length=80)
+    trip_dates: Optional[TripDates] = None
+    duration_days: Optional[int] = Field(None, gt=0, le=60)
+    companions: Optional[Companions] = None
+    budget_level: Optional[BudgetLevel] = None
+    interests: List[Interest] = Field(default_factory=list)
+    dietary: Optional[str] = Field(None, max_length=200)
+    language: Language = "vi"
+
+    @model_validator(mode="after")
+    def _reconcile_duration(self):
+        # Nếu cả `trip_dates` và `duration_days` đều có nhưng lệch → trip_dates thắng
+        # (1 source of truth), ghi đè duration_days cho khớp.
+        if self.trip_dates and self.duration_days:
+            actual = self.trip_dates.length_days
+            if actual != self.duration_days:
+                self.duration_days = actual
+        return self
+
+
+class RecommendRequest(BaseModel):
+    model_config = _CAMEL_CONFIG
+
+    session_id: str
+    limit: int = Field(10, gt=0, le=50)
+    district: Optional[str] = None
+    include_hotels: bool = False
+
+
+class RecommendItem(BaseModel):
+    """View model phẳng cho recommend response — KHÔNG expose SearchResultSchema
+    để mọi thay đổi internal schema không thành breaking change cho API."""
+
+    model_config = _CAMEL_CONFIG
+
+    place_id: str
+    name: str
+    collection: str
+    district: str = ""
+    rating: Optional[float] = None
+    rating_display: str = ""
+    price_display: str = ""
+    address: str = ""
+    recommend_score: float = Field(..., ge=0.0, le=1.0)
+    matched_interests: List[Interest] = Field(default_factory=list)
+
+
+class RecommendResponse(BaseModel):
+    model_config = _CAMEL_CONFIG
+
+    items: List[RecommendItem]
+    profile_used: UserProfile
+    relaxed: bool = False
+    notes: List[str] = Field(default_factory=list)

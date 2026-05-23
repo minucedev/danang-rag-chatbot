@@ -48,3 +48,14 @@ DEFAULT_TEMPERATURE: float = float(os.getenv("DEFAULT_TEMPERATURE", "0.2"))
 DEFAULT_TOP_K: int = int(os.getenv("DEFAULT_TOP_K", "5"))
 SCORE_THRESHOLD: float = float(os.getenv("SCORE_THRESHOLD", "0.3"))
 MAX_HISTORY_TURNS: int = 2
+
+# Gemini fallback — khi Qdrant retrieve trả 0 kết quả, gọi Gemini thay vì local LLM.
+GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_BASE_URL: str = os.getenv(
+    "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"
+)
+GEMINI_TIMEOUT_SECONDS: float = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "30"))
+GEMINI_FALLBACK_PREFIX_DISCLAIMER: bool = (
+    os.getenv("GEMINI_FALLBACK_PREFIX_DISCLAIMER", "true").lower() in ("1", "true", "yes")
+)

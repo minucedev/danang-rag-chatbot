@@ -13,7 +13,7 @@ from app.rag.llm import load_llm
 from app.rag.pipeline import RAGPipeline
 import app.rag.pipeline as pl_module
 
-from app.api import chat, sessions, health
+from app.api import chat, sessions, health, profile, recommend
 
 
 @asynccontextmanager
@@ -61,6 +61,8 @@ app.add_middleware(
 app.include_router(chat.router)
 app.include_router(sessions.router)
 app.include_router(health.router)
+app.include_router(profile.router)
+app.include_router(recommend.router)
 
 # Module-level placeholder so health.py can check before pipeline loads
 pl_module._pipeline_instance = None

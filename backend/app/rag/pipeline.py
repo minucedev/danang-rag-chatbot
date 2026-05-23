@@ -14,6 +14,7 @@ from app.rag.analyzer import LLMQueryAnalyzer
 from app.rag.retrieval import retrieve_by_intent
 from app.rag.rerank import rerank_results
 from app.rag.llm import generate_streaming
+from app.rag.gemini_fallback import generate_gemini_streaming, GeminiFallbackError
 from app.rag.memory import build_search_query, build_history_messages
 from app.rag.schemas import SearchResultSchema
 from app.utils.nfc import normalize_nfc
@@ -31,6 +32,26 @@ _SYSTEM_PROMPT = (
     "LUÔN trả lời bằng tiếng Việt. "
     "Trả lời ngắn gọn, chính xác, thân thiện."
 )
+
+# Prompt rút gọn cho nhánh Gemini fallback: không có "Reference data" nên không
+# gò bám tham chiếu — chỉ cảnh báo đừng bịa thông tin cụ thể.
+_GEMINI_SYSTEM_PROMPT = (
+    "Bạn là trợ lý du lịch Đà Nẵng. LUÔN trả lời bằng tiếng Việt, ngắn gọn, thân thiện.\n"
+    "Trả lời dựa trên hiểu biết tổng quát của bạn về Đà Nẵng và Việt Nam.\n"
+    "QUAN TRỌNG: Nếu không chắc chắn về một thông tin cụ thể (giá phòng, giờ mở cửa, "
+    "địa chỉ chính xác), HÃY NÓI RÕ bạn không chắc thay vì bịa số liệu."
+)
+
+
+def _build_gemini_messages(
+    query: str,
+    history: list[dict],
+    intent: QueryIntent,
+) -> list[dict]:
+    messages = [{"role": "system", "content": _GEMINI_SYSTEM_PROMPT}]
+    messages.extend(build_history_messages(history, config.MAX_HISTORY_TURNS))
+    messages.append({"role": "user", "content": query})
+    return messages
 
 
 def _format_context(results: List[SearchResultSchema]) -> str:
@@ -206,6 +227,69 @@ class RAGPipeline:
 
         sources = [r.to_dict() for r in results[:10]]
         yield {"type": "sources", "items": sources, "total": len(sources)}
+
+        # 3.5. Fallback sang Gemini khi retrieve trả 0 kết quả.
+        #
+        # Quy tắc xử lý lỗi (tránh trộn provider):
+        # - KHÔNG emit `fallback`/disclaimer cho đến khi Gemini chunk đầu tiên về.
+        # - Gemini fail TRƯỚC chunk đầu → silently fall through local LLM (client
+        #   chưa thấy event nào liên quan Gemini → không cần "rollback").
+        # - Gemini fail SAU khi đã có chunk → emit `error`+`done`, KHÔNG fall through
+        #   để không trộn câu trả lời Qwen vào output đã gắn nhãn Gemini.
+        if not results and config.GEMINI_API_KEY:
+            gemini_messages = _build_gemini_messages(q, history, intent)
+            committed_to_gemini = False
+            gemini_tokens = 0
+            t_gemini_start = time.perf_counter()
+            try:
+                async for tok in generate_gemini_streaming(
+                    gemini_messages,
+                    stop_event,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                ):
+                    if stop_event.is_set():
+                        break
+                    if not committed_to_gemini:
+                        # Chunk đầu OK → giờ mới cam kết: phát fallback event + disclaimer.
+                        yield {
+                            "type": "fallback",
+                            "reason": "no_results",
+                            "provider": "gemini",
+                            "model": config.GEMINI_MODEL,
+                        }
+                        if config.GEMINI_FALLBACK_PREFIX_DISCLAIMER:
+                            yield {
+                                "type": "token",
+                                "text": "_(Trả lời từ AI tổng quát — không có dữ liệu nội bộ phù hợp.)_\n\n",
+                            }
+                        committed_to_gemini = True
+                    gemini_tokens += 1
+                    yield {"type": "token", "text": tok}
+
+                if committed_to_gemini:
+                    t_gemini_done = time.perf_counter()
+                    print(
+                        f"[TIMING] gemini_fallback: {(t_gemini_done - t_gemini_start)*1000:.0f}ms "
+                        f"({gemini_tokens} chunks)"
+                    )
+                    yield {"type": "done"}
+                    return
+                # else: stream rỗng + chưa committed → rơi xuống local LLM bên dưới
+                #       (nhánh _yielded_any guard trong gemini_fallback.py thường đã raise
+                #       trước khi tới đây, nhưng giữ an toàn cho mọi đường thoát).
+            except GeminiFallbackError as e:
+                status = f" status={e.status_code}" if e.status_code is not None else ""
+                print(f"[gemini-fallback] failed{status}: {type(e).__name__}: {e}")
+                if committed_to_gemini:
+                    # Đã ship token Gemini cho client → KHÔNG trộn Qwen vào. Báo lỗi
+                    # rồi đóng stream; frontend sẽ thấy disclaimer + tokens đã nhận +
+                    # error + done. `fallback_used` ở chat.py giữ True → intent lưu
+                    # là "gemini_fallback" (đúng: nội dung từ Gemini, dù dở dang).
+                    yield {"type": "error", "message": "Gemini bị gián đoạn giữa chừng."}
+                    yield {"type": "done"}
+                    return
+                # Chưa committed → client chưa thấy gì về Gemini, fall through im lặng.
 
         # 4. Build prompt (hiển thị q gốc cho UX) — rẽ nhánh theo intent
         messages = _build_messages(q, results, history, intent)
