@@ -22,3 +22,28 @@ CREATE TABLE IF NOT EXISTS profiles (
     profile_json TEXT    NOT NULL,
     updated_at   INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    source          TEXT    NOT NULL,
+    source_event_id TEXT    NOT NULL,
+    title           TEXT    NOT NULL,
+    description     TEXT,
+    start_time      INTEGER,
+    end_time        INTEGER,
+    venue_name      TEXT,
+    address         TEXT,
+    district        TEXT,
+    latitude        REAL,
+    longitude       REAL,
+    url             TEXT,
+    image_url       TEXT,
+    raw_json        TEXT,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL,
+    last_seen_at    INTEGER NOT NULL,
+    UNIQUE (source, source_event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_start ON events(start_time);
+CREATE INDEX IF NOT EXISTS idx_events_district ON events(district);

@@ -59,3 +59,13 @@ GEMINI_TIMEOUT_SECONDS: float = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "30"))
 GEMINI_FALLBACK_PREFIX_DISCLAIMER: bool = (
     os.getenv("GEMINI_FALLBACK_PREFIX_DISCLAIMER", "true").lower() in ("1", "true", "yes")
 )
+
+# Event crawler (SerpAPI). Crawler chạy định kỳ trong lifespan,
+# upsert vào bảng `events` của SQLite. Empty key = crawler bị skip.
+SERPAPI_KEY: str = os.getenv("SERPAPI_KEY", "")
+CACHE_TTL_HOURS: int = int(os.getenv("CACHE_TTL_HOURS", "24"))
+DEFAULT_RADIUS_KM: int = int(os.getenv("DEFAULT_RADIUS_KM", "30"))
+DEFAULT_EVENT_DAYS: int = int(os.getenv("DEFAULT_EVENT_DAYS", "7"))
+DEFAULT_EVENT_LIMIT: int = int(os.getenv("DEFAULT_EVENT_LIMIT", "50"))
+# Bảo vệ POST /api/admin/crawl/events. Empty = endpoint bị disable.
+ADMIN_TOKEN: str = os.getenv("ADMIN_TOKEN", "")

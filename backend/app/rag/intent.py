@@ -11,6 +11,7 @@ class QueryIntent(Enum):
     PRICE_SEARCH = "price_search"
     GENERAL = "general"
     SPECIFIC_SEARCH = "specific_search"
+    EVENT_SEARCH = "event_search"
 
     @property
     def display(self) -> str:
@@ -23,6 +24,7 @@ class QueryIntent(Enum):
             "price_search": "Giá",
             "general": "Tổng quát",
             "specific_search": "Địa điểm cụ thể",
+            "event_search": "Sự kiện",
         }
         return _map[self.value]
 

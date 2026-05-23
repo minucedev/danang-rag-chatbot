@@ -69,7 +69,7 @@ class LLMQueryAnalyzer:
             "Chỉ trả về DUY NHẤT một khối JSON. Không giải thích, không thêm text ngoài JSON.\n"
             "Cấu trúc JSON bắt buộc phải tuân theo chính xác schema sau:\n"
             "{\n"
-            '  "intent": "hotel_search" | "restaurant_search" | "place_search" | "review_search" | "general",\n'
+            '  "intent": "hotel_search" | "restaurant_search" | "place_search" | "review_search" | "event_search" | "general",\n'
             '  "rewritten_query": "chuỗi từ khóa tìm kiếm rút gọn để tạo embedding",\n'
             '  "filters": {\n'
             '    "district": "son tra" | "hai chau" | "ngu hanh son" | "cam le" | "lien chieu" | "thanh khe" | null,\n'
@@ -131,6 +131,34 @@ Trả về JSON:
 {{
   "intent": "specific_search",
   "rewritten_query": "Sala Danang Beach Hotel",
+  "filters": {{
+    "district": null,
+    "min_rating": null,
+    "max_price": null,
+    "min_price": null
+  }}
+}}
+
+### VÍ DỤ 5:
+Người dùng: "Tối nay ở Hải Châu có lễ hội gì không?"
+Trả về JSON:
+{{
+  "intent": "event_search",
+  "rewritten_query": "lễ hội sự kiện tối nay Hải Châu",
+  "filters": {{
+    "district": "hai chau",
+    "min_rating": null,
+    "max_price": null,
+    "min_price": null
+  }}
+}}
+
+### VÍ DỤ 6:
+Người dùng: "Cuối tuần này Đà Nẵng có concert hay sự kiện gì vui không?"
+Trả về JSON:
+{{
+  "intent": "event_search",
+  "rewritten_query": "concert sự kiện cuối tuần Đà Nẵng",
   "filters": {{
     "district": null,
     "min_rating": null,

@@ -17,6 +17,7 @@ from app.rag.llm import generate_streaming
 from app.rag.gemini_fallback import generate_gemini_streaming, GeminiFallbackError
 from app.rag.memory import build_search_query, build_history_messages
 from app.rag.schemas import SearchResultSchema
+from app.rag.events_retrieval import retrieve_events, format_events_context
 from app.utils.nfc import normalize_nfc
 
 # Vietnamese few-shot examples to prevent English responses
@@ -114,6 +115,31 @@ def _dedup_by_display_name(
     return deduped
 
 
+def _build_event_messages(
+    query: str,
+    events: list[dict],
+    history: list[dict],
+) -> list[dict]:
+    context = format_events_context(events)
+    empty_note = "" if events else "\nLưu ý: Không tìm thấy sự kiện nào trong thời gian này.\n"
+    user_prompt = f"""### Câu hỏi:
+{query}
+
+### Sự kiện đang diễn ra / sắp diễn ra tại Đà Nẵng:
+{context}{empty_note}
+
+### QUY TẮC:
+1. Chỉ trả lời dựa trên danh sách sự kiện trên. Không tự sáng tạo sự kiện.
+2. Trả lời ngắn gọn, thân thiện, bằng tiếng Việt.
+3. Nếu không có sự kiện phù hợp, thông báo lịch sự và gợi ý người dùng hỏi lại sau.
+
+### Trả lời:"""
+    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    messages.extend(build_history_messages(history, config.MAX_HISTORY_TURNS))
+    messages.append({"role": "user", "content": user_prompt})
+    return messages
+
+
 def _build_messages(
     query: str,
     results: List[SearchResultSchema],
@@ -200,6 +226,34 @@ class RAGPipeline:
         intent = analysis["intent"]
         rewritten = analysis["rewritten_query"]
         yield {"type": "intent", "value": intent.value, "display": intent.display}
+
+        # Event search: bypass Qdrant, query SQLite events rồi stream trực tiếp.
+        if intent == QueryIntent.EVENT_SEARCH:
+            district = (analysis["filters"].get("district") or "").strip() or None
+            try:
+                events = await retrieve_events(district=district)
+            except Exception as exc:
+                print(f"[pipeline] events retrieval failed: {type(exc).__name__}: {exc}")
+                events = []
+            sources = events[:10]
+            yield {"type": "sources", "items": sources, "total": len(sources)}
+            messages = _build_event_messages(q, events, history)
+            t_before_gen = time.perf_counter()
+            first_token_logged = False
+            token_count = 0
+            async for token in generate_streaming(
+                messages, self.llm, stop_event,
+                max_new_tokens=max_new_tokens, temperature=temperature,
+            ):
+                if not first_token_logged:
+                    t_first = time.perf_counter()
+                    print(f"[TIMING] event_prefill+first_token: {(t_first - t_before_gen)*1000:.0f}ms")
+                    first_token_logged = True
+                token_count += 1
+                yield {"type": "token", "text": token}
+            print(f"[TIMING] event_generation: {token_count} tokens")
+            yield {"type": "done"}
+            return
 
         # 2. Trộn filter: FE sidebar thắng, analyzer điền field trống
         merged = _merge_filters(filters, analysis["filters"])
