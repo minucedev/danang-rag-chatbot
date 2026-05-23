@@ -1,171 +1,197 @@
-# Frontend — Next.js Chat UI
+# Frontend - Next.js Chat UI
 
-Giao diện chatbot du lịch Đà Nẵng: session sidebar, filter sidebar, streaming chat với source cards.
+Frontend la giao dien chatbot du lich Da Nang: session sidebar, filter dropdown, quick replies, source cards va chat streaming qua SSE.
 
----
+## Stack
 
-## Yêu cầu
+- Next.js `16.2.4` App Router
+- React `19.2.4`
+- TypeScript
+- Tailwind CSS 4
+- Radix/shadcn-style UI components
+- TanStack Query
+- `fetch` + `ReadableStream` de doc SSE POST stream
 
-- **Node.js 20+** — kiểm tra: `node --version`
-- **npm** — đi kèm với Node.js
+## Yeu cau
 
-GPU không cần thiết để chạy frontend.
+- Node.js `20+`
+- npm
+- Backend FastAPI neu muon chat that
 
----
+Kiem tra:
 
-## Bước 1 — Cài packages
+```powershell
+node --version
+npm --version
+```
+
+## Cai dat
 
 ```powershell
 cd frontend
 npm install
 ```
 
-Mất ~1-2 phút lần đầu.
+## Cau hinh backend URL
 
----
-
-## Bước 2 — Cấu hình backend URL
-
-File `.env.local` đã có sẵn với giá trị mặc định:
+File `frontend/.env.local`:
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-**Trường hợp backend chạy trên máy khác (ví dụ GPU server riêng):**
+Neu backend chay tren may GPU rieng:
 
-Sửa `frontend/.env.local`:
 ```env
 NEXT_PUBLIC_API_URL=http://192.168.1.100:8000
 ```
 
-Thay `192.168.1.100` bằng IP thật của máy chạy backend.
+Backend hien chi allow CORS mac dinh cho:
 
-> Backend phải cho phép CORS từ địa chỉ frontend. Mặc định đã cấu hình cho `localhost:3000`.  
-> Nếu frontend chạy trên máy khác, cần sửa `backend/app/main.py` → `allow_origins` thêm IP của máy frontend.
+```text
+http://localhost:3000
+http://127.0.0.1:3000
+```
 
----
+Neu frontend chay tu host/IP khac, can them origin trong `backend/app/main.py`.
 
-## Bước 3 — Chạy dev server
+## Chay dev server
 
 ```powershell
 npm run dev
 ```
 
-Mở `http://localhost:3000` trong trình duyệt.
+Mo `http://localhost:3000`.
 
-Server khởi động trong ~1 giây. Terminal hiện:
+Frontend co the render khi backend chua chay. Gui tin nhan luc nay se hien toast loi ket noi.
+
+## Scripts
+
+| Lenh | Mo ta |
+|------|-------|
+| `npm run dev` | Chay Next dev server |
+| `npm run build` | Build production |
+| `npm run start` | Chay production sau build |
+| `npm run lint` | Chay ESLint |
+| `npx tsc --noEmit` | Type-check TypeScript |
+
+## Luong chat
+
+1. `useChat` goi `POST /api/chat/stream` voi body:
+
+```json
+{
+  "session_id": "optional-session-id",
+  "message": "Goi y khach san 4 sao o Son Tra",
+  "filters": {
+    "district": "son tra",
+    "min_rating": 8,
+    "min_price": 500000,
+    "max_price": 2000000
+  }
+}
 ```
-▲ Next.js 16.x.x (Turbopack)
-- Local:  http://localhost:3000
-✓ Ready in 651ms
+
+2. Frontend doc SSE events:
+
+```text
+meta -> waiting? -> intent -> sources -> fallback? -> token* -> done
 ```
 
----
+3. `meta` tra session/message IDs; frontend ghi thang vao TanStack Query cache de tranh mat tin nhan khi rerender.
+4. `sources` render source cards truoc khi token ve.
+5. `token` append vao assistant bubble.
+6. `done` finalize message.
 
-## Chạy không có backend
+## Cau truc thu muc
 
-Frontend render hoàn toàn mà không cần backend:
-- Giao diện hiển thị đầy đủ: session sidebar, quick replies, filter sidebar
-- Gửi tin nhắn → toast đỏ "Lỗi chat" (network error vì backend không có)
-- Dùng để review UI, screenshot, demo layout
-
----
-
-## Cấu trúc thư mục
-
-```
+```text
 frontend/
-├── app/
-│   ├── layout.tsx              ← root layout: Inter font VN, providers, toast
-│   ├── page.tsx                ← redirect → /chat
-│   ├── providers.tsx           ← QueryClientProvider (TanStack Query)
-│   └── chat/
-│       ├── layout.tsx          ← 2-column: SessionSidebar + main
-│       ├── page.tsx            ← empty state + quick replies
-│       └── [sessionId]/
-│           └── page.tsx        ← chat session view
-├── components/
-│   ├── chat/
-│   │   ├── ChatInput.tsx       ← textarea, Enter/Stop button
-│   │   ├── MessageList.tsx     ← auto-scroll message list
-│   │   ├── MessageBubble.tsx   ← user (blue) & assistant (markdown)
-│   │   ├── IntentBadge.tsx     ← "Khách sạn", "Nhà hàng", ...
-│   │   ├── SourceCard.tsx      ← card: tên, quận, rating, giá, Maps link
-│   │   ├── SourceCardList.tsx  ← horizontal scroll, expand/collapse
-│   │   └── QuickReplies.tsx    ← 6 quick reply cards
-│   ├── filters/
-│   │   └── FilterSidebar.tsx   ← dropdown: district chips, rating/price slider
-│   ├── sessions/
-│   │   ├── SessionSidebar.tsx  ← danh sách session nhóm theo ngày
-│   │   ├── SessionItem.tsx     ← rename/delete dialog
-│   │   └── NewChatButton.tsx
-│   └── ui/                     ← shadcn/ui components
-├── hooks/
-│   ├── useChat.ts              ← SSE stream, abort, status machine
-│   ├── useSessions.ts          ← TanStack Query: list/rename/delete
-│   └── useFilters.ts           ← URL search params: district/rating/price
-├── lib/
-│   ├── api.ts                  ← fetch wrapper với base URL
-│   ├── sse.ts                  ← async generator đọc SSE stream
-│   ├── nfc.ts                  ← NFC normalize input tiếng Việt
-│   ├── format.ts               ← formatVND, intentLabel, relativeDate
-│   └── utils.ts                ← cn() helper (clsx + tailwind-merge)
-├── constants/
-│   ├── districts.ts            ← 8 quận Đà Nẵng (label + slug)
-│   └── quickReplies.ts         ← 6 quick reply prompts
-├── .env.local                  ← NEXT_PUBLIC_API_URL (không commit)
-└── next.config.ts
+|- app/
+|  |- layout.tsx        Inter Vietnamese font, providers, toaster
+|  |- page.tsx          redirect sang /chat
+|  `- chat/
+|     |- layout.tsx     shell voi SessionSidebar
+|     |- page.tsx       new chat + quick replies
+|     `- [sessionId]/   chat session view
+|- components/
+|  |- chat/             input, message list, source cards, intent badge
+|  |- filters/          FilterSidebar
+|  |- sessions/         session list, rename/delete, new chat
+|  `- ui/               local UI primitives
+|- hooks/
+|  |- useChat.ts        SSE stream + abort + status
+|  |- useSessions.ts    TanStack Query cho sessions/messages
+|  `- useFilters.ts     URL search params
+|- lib/
+|  |- api.ts            REST fetch wrapper
+|  |- sse.ts            SSE parser cho POST stream
+|  |- nfc.ts            normalize input tieng Viet
+|  |- format.ts         VND, intent labels, relative date
+|  `- utils.ts          cn()
+`- constants/
+   |- districts.ts
+   `- quickReplies.ts
 ```
 
----
+## Tinh nang UI
 
-## Tính năng giao diện
-
-| Tính năng | Mô tả |
+| Tinh nang | Mo ta |
 |-----------|-------|
-| **Quick replies** | 6 câu hỏi gợi ý khi vào lần đầu. Click để tự động gửi |
-| **Streaming** | Câu trả lời hiện ra từng từ theo thời gian thực |
-| **Intent badge** | Hiện "Đang tìm: Khách sạn / Nhà hàng / Địa điểm..." trong khi xử lý |
-| **Source cards** | Card kết quả: tên, quận, rating ★, giá VND, link Google Maps |
-| **Filter sidebar** | Lọc theo quận, đánh giá tối thiểu, giá tối đa. Filter lưu vào URL |
-| **Session history** | Lịch sử hội thoại nhóm theo Hôm nay / Hôm qua / Trước đó |
-| **Rename / Delete** | Đổi tên hoặc xóa session qua context menu |
-| **Stop generation** | Nút Stop (■) dừng LLM đang stream |
-| **Multi-turn** | Bot nhớ context từ các tin nhắn trước trong cùng session |
+| Quick replies | 6 cau goi y o empty state |
+| Streaming | Assistant bubble hien token dan |
+| Intent badge | Hien intent nhu Khach san, Nha hang, Dia diem cu the |
+| Source cards | Ten, quan, rating, gia, dia chi, Google Maps link |
+| Filters | District, min rating, min price, max price; luu tren URL |
+| Session history | List/rename/delete sessions |
+| Stop generation | AbortController dung stream |
+| Multi-turn | Gui tiep trong session cu, backend lay history |
 
----
+## Verify voi backend
+
+```powershell
+curl http://localhost:8000/api/health
+```
+
+Sau do mo UI va gui:
+
+```text
+Goi y khach san 4 sao o Son Tra
+```
+
+Ky vong:
+
+- Co intent badge.
+- Co source cards.
+- Cau tra loi stream dan.
+- Sidebar co session moi.
+- Reload `/chat/{sessionId}` van co history.
 
 ## Troubleshooting
 
-### Trang trắng hoặc lỗi `hydration`
-
-```powershell
-# Xóa cache Next.js và build lại
-rm -rf .next
-npm run dev
-```
-
-### `ENOENT: node_modules not found`
+### `node_modules` missing
 
 ```powershell
 npm install
 ```
 
-### Toast "Lỗi chat" ngay khi gửi message
+### Toast "Loi chat"
 
-Backend chưa chạy hoặc URL sai. Kiểm tra:
-1. `curl http://localhost:8000/api/health` phải trả JSON
-2. `NEXT_PUBLIC_API_URL` trong `.env.local` phải đúng
+Backend chua chay, backend chua `Server ready.`, hoac `NEXT_PUBLIC_API_URL` sai.
 
-### CORS error trong console trình duyệt
+### CORS error
 
+Dam bao frontend chay dung `http://localhost:3000` hoac them origin vao backend CORS.
+
+### Trang trang/hydration issue
+
+Xoa cache Next:
+
+```powershell
+Remove-Item -Recurse -Force .next
+npm run dev
 ```
-Access to fetch at 'http://localhost:8000' from origin 'http://localhost:3000' has been blocked by CORS
-```
 
-Backend đang block. Thường do backend chưa khởi động hoàn toàn. Chờ "Server ready." trong terminal backend.
+### Font tieng Viet khong dung
 
-### Font tiếng Việt bị vỡ (không render dấu)
-
-Xảy ra nếu mạng bị firewall block Google Fonts. Next.js tự host font, không cần mạng sau lần build đầu. Chạy `npm run dev` lại để download font.
+Next dung `Inter` voi subset `vietnamese`. Neu build lan dau bi chan mang khi tai font, chay lai `npm run dev` sau khi co mang.

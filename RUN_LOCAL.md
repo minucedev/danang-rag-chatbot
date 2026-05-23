@@ -1,236 +1,174 @@
-# Hướng dẫn chạy `pbl7-rag.ipynb` trên máy local
+# Chay local: app full stack va notebook
 
-Notebook này được build cho Kaggle. Tài liệu này mô tả các bước cần thiết để kéo về chạy trên máy có GPU NVIDIA, vẫn giữ nguyên format `.ipynb`.
+Repo nay co 2 cach chay:
 
----
+1. **App full stack**: backend FastAPI + frontend Next.js. Day la duong chay demo hien tai.
+2. **Notebook `pbl7-rag.ipynb`**: prototype/nghien cuu goc. Notebook co the lech voi runtime app neu chua sync lai.
 
-## 1. Yêu cầu phần cứng
+Neu muc tieu la demo san pham, uu tien chay app full stack theo README goc va README backend/frontend.
 
-| Thành phần | Tối thiểu | Khuyến nghị |
-|------------|-----------|-------------|
-| GPU NVIDIA (CUDA) | VRAM 6GB | VRAM ≥ 8GB |
-| RAM hệ thống | 12GB | 16GB |
-| Disk trống | 10GB | 15GB (cho HF cache) |
-| Driver NVIDIA | ≥ 525.x | mới nhất |
+## 1. Chay app full stack
 
-> Tham khảo: Qwen2.5-3B 4-bit ≈ 2.5GB VRAM + bge-m3 ≈ 2.3GB VRAM + buffer cho inference.
+### Can chuan bi
 
-**Không có GPU NVIDIA → không chạy được** (`bitsandbytes` 4-bit yêu cầu CUDA).
+- Python 3.10/3.11.
+- Node.js 20+ va npm.
+- Qdrant URL + API key.
+- File GGUF cho local LLM, mac dinh:
 
----
-
-## 2. Cài đặt môi trường
-
-### 2.1. Python
-- Cài **Python 3.10** hoặc **3.11** (tránh 3.12+ vì một số package chưa stable trên 3.12).
-- Trên Windows: tải từ python.org, tick **"Add Python to PATH"** khi cài.
-
-### 2.2. CUDA Toolkit
-- Cài **CUDA 12.1** (khớp với PyTorch wheel ở bước 2.4).
-- Verify: chạy `nvidia-smi` trong terminal, phải thấy GPU và CUDA version.
-
-### 2.3. Tạo virtual environment
-
-**Linux / macOS:**
-```bash
-cd /path/to/PPBL_chat
-python3.11 -m venv .venv
-source .venv/bin/activate
+```text
+backend/models/qwen2.5-3b-instruct-q4_k_m.gguf
 ```
 
-**Windows (PowerShell):**
+- GPU NVIDIA/CUDA neu muon backend chay duoc toc do demo. Khong co GPU van co the chay frontend UI rieng.
+
+### Backend
+
 ```powershell
 cd E:\University\HK2_Nam4\PPBL_chat
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
 
-> Nếu PowerShell báo lỗi execution policy:
-> `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`
-
-### 2.4. Cài PyTorch với CUDA
-**Phải cài PyTorch CUDA TRƯỚC khi cài các package khác**, không thì pip kéo bản CPU.
-
-```bash
 pip install --upgrade pip
 pip install torch --index-url https://download.pytorch.org/whl/cu121
+pip install -r backend/requirements.txt
+
+copy backend\.env.example backend\.env
+```
+
+Sua `backend/.env`:
+
+```env
+QDRANT_URL=https://your-cluster.cloud.qdrant.io:6333
+QDRANT_API_KEY=your-api-key
+HF_TOKEN=your-huggingface-token
+LLM_GGUF_PATH=models/qwen2.5-3b-instruct-q4_k_m.gguf
+```
+
+Chay:
+
+```powershell
+cd backend
+uvicorn app.main:app --port 8000
 ```
 
 Verify:
-```bash
-python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
-```
-→ Phải in ra `True` và tên GPU.
 
-### 2.5. Cài Jupyter (để mở notebook)
-```bash
+```powershell
+curl http://localhost:8000/api/health
+```
+
+### Frontend
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Mo `http://localhost:3000`.
+
+## 2. Chay notebook `pbl7-rag.ipynb`
+
+Notebook duoc tao cho moi truong Kaggle/Colab prototype. No khong phai entrypoint chinh cua app FastAPI hien tai.
+
+### Yeu cau
+
+| Thanh phan | Toi thieu | Khuyen nghi |
+|------------|-----------|-------------|
+| GPU NVIDIA | 6GB VRAM | 8GB+ |
+| RAM | 12GB | 16GB+ |
+| Disk trong | 10GB | 15GB+ |
+| Python | 3.10/3.11 | 3.11 |
+
+### Tao env cho notebook
+
+```powershell
+cd E:\University\HK2_Nam4\PPBL_chat
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+pip install --upgrade pip
+pip install torch --index-url https://download.pytorch.org/whl/cu121
 pip install jupyterlab ipykernel
 python -m ipykernel install --user --name pbl7-rag --display-name "PBL7 RAG"
 ```
 
-Hoặc dùng **VS Code** với extension Jupyter (khuyên dùng trên Windows).
+### Notebook `.env`
 
-### 2.6. Các package còn lại
-**Không cần cài thủ công** — Cell 1 của notebook sẽ tự `pip install` khi chạy lần đầu (mất ~5 phút).
+Neu notebook doc `.env` o thu muc goc, tao `PPBL_chat/.env`:
 
-Các package sẽ được cài: `qdrant-client`, `sentence-transformers`, `transformers`, `accelerate`, `bitsandbytes`, `python-dotenv`, `pandas`, `langchain`, `langchain-community`.
-
----
-
-## 3. Cấu hình Qdrant + HuggingFace
-
-### 3.1. Tạo file `.env`
-Tạo file `.env` ở **cùng thư mục với notebook** (`PPBL_chat/.env`):
-
-```
-QDRANT_URL=https://511742a9-e9a3-4261-91dd-5dbb998f21a7.us-west-1-0.aws.cloud.qdrant.io:6333
-QDRANT_API_KEY=<dán api key từ Qdrant Cloud dashboard>
-HF_TOKEN=<token huggingface, optional nhưng khuyên dùng>
+```env
+QDRANT_URL=https://your-cluster.cloud.qdrant.io:6333
+QDRANT_API_KEY=your-api-key
+HF_TOKEN=your-huggingface-token
 ```
 
-> ⚠️ Thêm `.env` vào `.gitignore` — KHÔNG commit file này.
-
-### 3.2. HuggingFace token (optional)
-- Tạo token tại https://huggingface.co/settings/tokens (chỉ cần quyền `read`).
-- Có token → tránh rate-limit khi tải model lần đầu.
-
----
-
-## 4. Chỉnh sửa notebook (1 thay đổi nhỏ)
-
-Notebook hiện tại đọc credential từ Kaggle Secrets. Code đã có **fallback đọc env var**, chỉ cần thêm `load_dotenv()` để đọc file `.env`.
-
-### Mở `pbl7-rag.ipynb`, sửa **Cell 2**:
-
-Tìm dòng đầu cell 2 (sau block import `from langchain_core.callbacks import ...`) và thêm:
+Neu cell notebook van doc Kaggle Secrets, them `load_dotenv()` vao cell import:
 
 ```python
 from dotenv import load_dotenv
-load_dotenv()  # Load .env nếu có (no-op nếu không tồn tại)
+load_dotenv()
 
-# (Optional) forward HF_TOKEN cho HuggingFace library
 if os.getenv("HF_TOKEN"):
     os.environ["HUGGING_FACE_HUB_TOKEN"] = os.getenv("HF_TOKEN")
 ```
 
-**Không cần đổi bất kỳ cell nào khác.** Logic intent detection, retrieval, reranking, LLM giữ nguyên.
+### Mo notebook
 
----
+VS Code:
 
-## 5. Chạy notebook
+1. Mo folder `PPBL_chat`.
+2. Mo `pbl7-rag.ipynb`.
+3. Select Kernel -> `PBL7 RAG`.
+4. Run All.
 
-### Cách 1: VS Code
-1. Mở thư mục `PPBL_chat` trong VS Code.
-2. Mở `pbl7-rag.ipynb`.
-3. Click "Select Kernel" góc phải trên → chọn `.venv` vừa tạo.
-4. **Run All**.
+JupyterLab:
 
-### Cách 2: JupyterLab
-```bash
+```powershell
 jupyter lab
 ```
-→ Mở notebook trong trình duyệt → Kernel → chọn `PBL7 RAG` → Run All.
 
----
+## 3. Checklist truoc demo
 
-## 6. Verify từng bước
+- [ ] `node --version` >= 20.
+- [ ] `python --version` la 3.10/3.11.
+- [ ] `nvidia-smi` thay GPU neu chay backend local.
+- [ ] `backend/.env` co `QDRANT_URL`, `QDRANT_API_KEY`, `LLM_GGUF_PATH`.
+- [ ] File GGUF ton tai o duong dan `LLM_GGUF_PATH`.
+- [ ] `curl http://localhost:8000/api/health` tra JSON.
+- [ ] `npm run dev` frontend ready o `http://localhost:3000`.
+- [ ] Gui query tren UI co source cards va answer streaming.
 
-Chạy lần lượt và kiểm tra output:
+## 4. Troubleshooting nhanh
 
-| Cell | Output mong đợi | Nếu lỗi |
-|------|-----------------|---------|
-| 1 | `Packages ready.` | Network, hoặc Python version sai |
-| 2 | `Qdrant URL: https://...` + `CUDA available: True` | `False` → bước 2.4 sai. Thiếu URL → file `.env` chưa load được |
-| 3 | Không có output (chỉ define class) | — |
-| 4 | Tải bge-m3 (~2.3GB lần đầu), không lỗi | `401 Unauthorized` → `QDRANT_API_KEY` sai. `Connection refused` → URL sai |
-| 5 | `Local LLM ready: Qwen/Qwen2.5-3B-Instruct` | `CUDA out of memory` → đóng app khác. `bitsandbytes` lỗi → xem mục 7 |
-| 6 | `RAG Pipeline initialized successfully!` | — |
-| 7 | Demo 9 query, mỗi query in intent + answer + top results | — |
-| 8 | Demo filtered search | — |
+### Backend bao khong co Qdrant env
 
-### Test nhanh sau cell 4
-```python
-print(client.get_collections())   # phải list 7 collections
-print(encoder.encode(["test"]).shape)  # (1, 1024)
+Kiem tra `backend/.env` ton tai va chay server tu `backend/`:
+
+```powershell
+cd backend
+uvicorn app.main:app --port 8000
 ```
 
----
+### Backend khong load duoc GGUF
 
-## 7. Troubleshooting
+Kiem tra file:
 
-### `bitsandbytes` lỗi trên Windows
-```
-RuntimeError: CUDA Setup failed despite GPU being available
-```
-**Fix:**
-```bash
-pip install -U bitsandbytes
-```
-Nếu vẫn lỗi:
-```bash
-pip uninstall bitsandbytes -y
-pip install bitsandbytes --no-cache-dir
+```powershell
+ls backend\models
 ```
 
-### `CUDA out of memory` khi load Qwen
-- Đóng các app chiếm VRAM (Chrome với hardware acceleration, game, Photoshop...)
-- Hoặc đổi model nhỏ hơn — sửa cell 2:
-  ```python
-  LOCAL_LLM_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
-  ```
+Neu dung duong dan khac, sua `LLM_GGUF_PATH`.
 
-### HF rate-limit (`429 Too Many Requests`)
-- Đặt `HF_TOKEN` trong `.env` (xem mục 3.2).
-- Hoặc tải model trước bằng CLI:
-  ```bash
-  huggingface-cli download Qwen/Qwen2.5-3B-Instruct
-  huggingface-cli download BAAI/bge-m3
-  ```
+### Frontend bao Loi chat
 
-### Long Path lỗi trên Windows
-```
-OSError: [WinError 206] The filename or extension is too long
-```
-**Fix 1:** Bật Long Path trong Registry:
-```
-HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled = 1
+Backend chua ready hoac `frontend/.env.local` sai:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-**Fix 2:** Đổi HF cache sang path ngắn — thêm vào `.env`:
-```
-HF_HOME=D:\hf_cache
-```
+### Notebook va app cho ket qua khac nhau
 
-### Qdrant timeout
-Trong cell 4, đổi:
-```python
-client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=60)
-```
-thành:
-```python
-client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=120)
-```
-
----
-
-## 8. Thời gian ước tính
-
-| Bước | Thời gian |
-|------|-----------|
-| Cài CUDA + Python + venv + PyTorch | 30-45 phút (lần đầu) |
-| Cell 1 (cài packages) | ~5 phút (lần đầu), <5s sau đó |
-| Cell 4-5 (tải models) | ~10-15 phút (lần đầu), ~1 phút sau đó |
-| Cell 7 demo (9 queries) | ~3-5 phút |
-
-**Lần chạy thứ 2 trở đi:** ~2 phút khởi động (model load từ cache).
-
----
-
-## 9. Checklist cuối cùng trước khi Run All
-
-- [ ] `nvidia-smi` thấy GPU
-- [ ] `python -c "import torch; print(torch.cuda.is_available())"` → `True`
-- [ ] File `.env` tồn tại trong `PPBL_chat/`, có `QDRANT_URL` + `QDRANT_API_KEY`
-- [ ] Đã thêm `load_dotenv()` vào đầu cell 2
-- [ ] Kernel của notebook đang trỏ đúng vào `.venv`
-- [ ] `.env` đã được thêm vào `.gitignore`
+Day la binh thuong neu notebook chua sync voi code app. App hien tai dung FastAPI + llama.cpp GGUF + LLMQueryAnalyzer + SQLite sessions/profiles; notebook la prototype/doc nghien cuu.

@@ -261,10 +261,10 @@ Xây giao diện chatbot **hoàn chỉnh, polished, demo-ready** cho hệ thốn
 
 ## Cross-cutting checks (chạy cuối)
 
-- [ ] `.gitignore` chứa `.env`, `data/chats.db*`, `node_modules/`, `__pycache__/`, `.next/`
-- [ ] `backend/README.md` — hướng dẫn setup + chạy `uvicorn`
-- [ ] `frontend/README.md` — hướng dẫn `npm install` + `npm run dev`
-- [ ] Update `RUN_LOCAL.md` reference tới backend/frontend mới
+- [x] `.gitignore` chứa `.env`, `data/chats.db*`, `node_modules/`, `__pycache__/`, `.next/`
+- [x] `backend/README.md` — hướng dẫn setup + chạy `uvicorn`
+- [x] `frontend/README.md` — hướng dẫn `npm install` + `npm run dev`
+- [x] Update `RUN_LOCAL.md` reference tới backend/frontend mới
 - [ ] Tất cả checkbox trong file này được tick `[x]`
 
 ---

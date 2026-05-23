@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
 
 # Virtual env
 .venv/
@@ -12,6 +13,8 @@ backend/.env
 
 # Data
 backend/data/
+backend/data/chats.db*
+backend/models/
 
 # Jupyter
 .ipynb_checkpoints/
@@ -19,6 +22,9 @@ backend/data/
 # Node
 node_modules/
 danang-rag-chatbot/
+
 # Build
 dist/
 build/
+.next/
+frontend/.next/
