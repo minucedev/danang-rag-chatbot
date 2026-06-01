@@ -24,6 +24,14 @@ class QwenHF:
         self.processor = processor
         self.device = device
 
+    def _get_tokenizer(self):
+        """Trả về tokenizer đúng: VLM dùng processor.tokenizer, text-only dùng processor."""
+        return self.processor.tokenizer if hasattr(self.processor, "tokenizer") else self.processor
+
+    def _decode(self, token_ids) -> str:
+        """Decode token IDs — dùng tokenizer đúng cho cả VLM và text-only."""
+        return self._get_tokenizer().decode(token_ids, skip_special_tokens=True).strip()
+
     def create_chat_completion(
         self,
         messages: list[dict],
@@ -44,16 +52,16 @@ class QwenHF:
             add_generation_prompt=True,
             enable_thinking=False,
         )
-        inputs = self.processor([text], return_tensors="pt").to(self.device)
+        inputs = self.processor(text=text, return_tensors="pt").to(self.device)
         with torch.no_grad():
             output_ids = self.model.generate(
                 **inputs,
                 max_new_tokens=max_tokens,
                 do_sample=False,
-                pad_token_id=self.processor.tokenizer.eos_token_id,
+                pad_token_id=self._get_tokenizer().eos_token_id,
             )
         generated = output_ids[0][inputs["input_ids"].shape[-1]:]
-        content = self.processor.decode(generated, skip_special_tokens=True).strip()
+        content = self._decode(generated)
         content = re.sub(r"<think>[\s\S]*?</think>", "", content).strip()
         return {"choices": [{"message": {"content": content}}]}
 
@@ -68,9 +76,9 @@ class QwenHF:
             add_generation_prompt=True,
             enable_thinking=False,
         )
-        inputs = self.processor([text], return_tensors="pt").to(self.device)
+        inputs = self.processor(text=text, return_tensors="pt").to(self.device)
         streamer = TextIteratorStreamer(
-            self.processor.tokenizer,
+            self._get_tokenizer(),
             skip_special_tokens=True,
             skip_prompt=True,
         )
@@ -80,7 +88,7 @@ class QwenHF:
             "max_new_tokens": max_tokens,
             "do_sample": do_sample,
             "streamer": streamer,
-            "pad_token_id": self.processor.tokenizer.eos_token_id,
+            "pad_token_id": self._get_tokenizer().eos_token_id,
         }
         if do_sample:
             gen_kwargs["temperature"] = temperature
