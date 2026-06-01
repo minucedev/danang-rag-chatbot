@@ -12,6 +12,8 @@ class QueryIntent(Enum):
     GENERAL = "general"
     SPECIFIC_SEARCH = "specific_search"
     EVENT_SEARCH = "event_search"
+    ITINERARY_SEARCH = "itinerary_search"
+    CHITCHAT = "chitchat"
 
     @property
     def display(self) -> str:
@@ -25,6 +27,8 @@ class QueryIntent(Enum):
             "general": "Tổng quát",
             "specific_search": "Địa điểm cụ thể",
             "event_search": "Sự kiện",
+            "itinerary_search": "Lịch trình",
+            "chitchat": "Trò chuyện",
         }
         return _map[self.value]
 
@@ -98,6 +102,16 @@ class CollectionRegistry:
             ]
         if intent == QueryIntent.PRICE_SEARCH:
             return [config.COLLECTION_ACCOMMODATION_HOTELS, config.COLLECTION_RESTAURANTS]
+        # ITINERARY_SEARCH: cần cả 3 loại — khách sạn + nhà hàng + địa điểm
+        if intent == QueryIntent.ITINERARY_SEARCH:
+            return [
+                config.COLLECTION_ACCOMMODATION_HOTELS,
+                config.COLLECTION_RESTAURANTS,
+                config.COLLECTION_PLACES,
+            ]
+        # CHITCHAT: không cần collection nào
+        if intent == QueryIntent.CHITCHAT:
+            return []
         # SPECIFIC_SEARCH: entity type unknown, rewritten_query is the name —
         # search the 3 primary collections (reviews/rooms add noise for "about X")
         # GENERAL

@@ -11,14 +11,24 @@ from llama_cpp import Llama
 from app import config
 from app.rag.intent import QueryIntent
 from app.rag.analyzer import LLMQueryAnalyzer
-from app.rag.retrieval import retrieve_by_intent
+from app.rag.retrieval import retrieve_by_intent, exact_name_search
 from app.rag.rerank import rerank_results
 from app.rag.llm import generate_streaming
 from app.rag.gemini_fallback import generate_gemini_streaming, GeminiFallbackError
-from app.rag.memory import build_search_query, build_history_messages
+from app.rag.memory import build_search_query, build_history_messages, extract_session_prefs, merge_session_prefs
+from app.db.sessions import get_session_context, upsert_session_context
 from app.rag.schemas import SearchResultSchema
 from app.rag.events_retrieval import retrieve_events, format_events_context
 from app.utils.nfc import normalize_nfc
+from app.db.missed_queries import log_missed_query
+
+# Intents có thể crawl được địa điểm thực tế — log khi miss
+_CRAWLABLE_INTENTS = {
+    QueryIntent.HOTEL_SEARCH,
+    QueryIntent.RESTAURANT_SEARCH,
+    QueryIntent.PLACE_SEARCH,
+    QueryIntent.SPECIFIC_SEARCH,
+}
 
 # Vietnamese few-shot examples to prevent English responses
 _FEW_SHOT = """Ví dụ:
@@ -32,6 +42,21 @@ _SYSTEM_PROMPT = (
     "Bạn là trợ lý du lịch Đà Nẵng chuyên nghiệp. "
     "LUÔN trả lời bằng tiếng Việt. "
     "Trả lời ngắn gọn, chính xác, thân thiện."
+)
+
+_CHITCHAT_SYSTEM_PROMPT = (
+    "Bạn là trợ lý du lịch Đà Nẵng thân thiện. LUÔN trả lời bằng tiếng Việt.\n"
+    "Với câu hỏi chung về bản thân: giới thiệu bạn là AI hỗ trợ du lịch Đà Nẵng, "
+    "có thể giúp tìm khách sạn, nhà hàng, địa điểm tham quan và sự kiện.\n"
+    "Với câu hỏi ngoài phạm vi (thời tiết, vé máy bay, ...): trả lời thân thiện và "
+    "hướng dẫn người dùng hỏi về du lịch Đà Nẵng."
+)
+
+_ITINERARY_RULES = (
+    "Hãy lập lịch trình theo từng ngày (Ngày 1, Ngày 2, ...). "
+    "Mỗi ngày gợi ý: buổi sáng (địa điểm tham quan), trưa (nhà hàng), "
+    "chiều (địa điểm hoặc hoạt động), tối (nhà hàng/giải trí), khách sạn (nếu phù hợp). "
+    "Chỉ dùng thông tin từ dữ liệu tham khảo. Ghi kèm đánh giá và địa chỉ cho mỗi gợi ý."
 )
 
 # Prompt rút gọn cho nhánh Gemini fallback: không có "Reference data" nên không
@@ -155,6 +180,10 @@ def _build_messages(
 2. TUYỆT ĐỐI KHÔNG GỢI Ý LUNG TUNG: Không liệt kê thêm các khách sạn/nhà hàng đối thủ khác mang tính chất so sánh hay đề xuất danh sách "Top 3". Người dùng chỉ cần thông tin của địa điểm họ hỏi.
 3. KHÔNG ẢO GIÁC: Chỉ dùng thông tin trong mục "Thông tin tham khảo". Không tự bịa ra thông tin nằm ngoài ngữ cảnh.
 4. XỬ LÝ KHI TRỐNG DỮ LIỆU: Nếu mục "Thông tin tham khảo" trống, hãy trả lời lịch sự: "Hiện hệ thống không tìm thấy thông tin của [tên địa điểm] trong cơ sở dữ liệu." """
+    elif intent == QueryIntent.ITINERARY_SEARCH:
+        rules = f"""### QUY TẮC BẮT BUỘC KHI TRẢ LỜI (TUÂN THỦ TUYỆT ĐỐI):
+{_ITINERARY_RULES}
+KHÔNG ẢO GIÁC — chỉ dùng địa điểm/nhà hàng/khách sạn có trong dữ liệu tham khảo."""
     else:
         rules = """### QUY TẮC BẮT BUỘC KHI TRẢ LỜI (TUÂN THỦ TUYỆT ĐỐI):
 1. KHÔNG ẢO GIÁC: Chỉ được sử dụng thông tin được cung cấp trong mục "Thông tin tham khảo". KHÔNG TỰ Ý BỊA RA tên địa điểm, giá cả hoặc địa chỉ nằm ngoài ngữ cảnh trên.
@@ -186,10 +215,12 @@ class RAGPipeline:
         encoder: SentenceTransformer,
         llm: Llama,
         qdrant_client: AsyncQdrantClient,
+        reranker=None,
     ) -> None:
         self.encoder = encoder
         self.llm = llm
         self.client = qdrant_client
+        self.reranker = reranker
         self.analyzer = LLMQueryAnalyzer(llm)
 
     async def answer_stream(
@@ -200,6 +231,7 @@ class RAGPipeline:
         stop_event: Optional[threading.Event] = None,
         max_new_tokens: int = config.DEFAULT_MAX_TOKENS,
         temperature: float = config.DEFAULT_TEMPERATURE,
+        session_id: Optional[str] = None,
     ) -> AsyncIterator[dict]:
         """Yield SSE-ready event dicts: intent → sources → token* → done."""
         if stop_event is None:
@@ -226,6 +258,29 @@ class RAGPipeline:
         intent = analysis["intent"]
         rewritten = analysis["rewritten_query"]
         yield {"type": "intent", "value": intent.value, "display": intent.display}
+
+        # Load session context một lần, cập nhật nếu có preference mới, rồi dùng cho filter merge
+        session_ctx: Optional[dict] = None
+        if session_id:
+            session_ctx = await get_session_context(session_id) or {}
+            prefs = extract_session_prefs(analysis)
+            if prefs:
+                session_ctx = {**session_ctx, **prefs}
+                await upsert_session_context(session_id, session_ctx)
+
+        # Chitchat: không cần RAG, trả lời trực tiếp từ LLM
+        if intent == QueryIntent.CHITCHAT:
+            yield {"type": "sources", "items": [], "total": 0}
+            chitchat_messages = [{"role": "system", "content": _CHITCHAT_SYSTEM_PROMPT}]
+            chitchat_messages.extend(build_history_messages(history, config.MAX_HISTORY_TURNS))
+            chitchat_messages.append({"role": "user", "content": q})
+            async for token in generate_streaming(
+                chitchat_messages, self.llm, stop_event,
+                max_new_tokens=max_new_tokens, temperature=temperature,
+            ):
+                yield {"type": "token", "text": token}
+            yield {"type": "done"}
+            return
 
         # Event search: bypass Qdrant, query SQLite events rồi stream trực tiếp.
         if intent == QueryIntent.EVENT_SEARCH:
@@ -255,17 +310,18 @@ class RAGPipeline:
             yield {"type": "done"}
             return
 
-        # 2. Trộn filter: FE sidebar thắng, analyzer điền field trống
+        # 2. Trộn filter: FE sidebar thắng, analyzer điền field trống, session context fill còn lại
         merged = _merge_filters(filters, analysis["filters"])
+        merged = merge_session_prefs(session_ctx, merged)
 
-        # 3. Retrieve bằng rewritten_query rồi rerank + dedup
+        # 3. Retrieve bằng rewritten_query với top_k cao hơn để reranker có đủ candidates
         t_retrieve_start = time.perf_counter()
         results = await retrieve_by_intent(
             query=rewritten,
             client=self.client,
             encoder=self.encoder,
             intent=intent,
-            top_k_per_collection=config.DEFAULT_TOP_K,
+            top_k_per_collection=config.TOP_K_RETRIEVE,
             filters=merged,
             score_threshold=config.SCORE_THRESHOLD,
         )
@@ -273,14 +329,36 @@ class RAGPipeline:
         print(f"[TIMING] retrieve_total: {(t_retrieve - t_retrieve_start)*1000:.0f}ms "
               f"({len(results)} hits)")
 
-        results = rerank_results(results, rewritten, intent)
+        # 4. BGE reranker → dedup
+        t_rerank_start = time.perf_counter()
+        if results and self.reranker is not None:
+            results = await rerank_results(
+                results, rewritten, self.reranker,
+                top_k=config.TOP_K_RERANK,
+                score_threshold=config.RERANK_SCORE_THRESHOLD,
+                intent=intent,
+            )
         results = _dedup_by_display_name(results)
         t_rerank = time.perf_counter()
-        print(f"[TIMING] rerank+dedup: {(t_rerank - t_retrieve)*1000:.0f}ms "
+        print(f"[TIMING] rerank+dedup: {(t_rerank - t_rerank_start)*1000:.0f}ms "
               f"(-> {len(results)} after dedup)")
+
+        # 4.5. Exact name fallback cho SPECIFIC_SEARCH khi không có kết quả
+        if not results and intent == QueryIntent.SPECIFIC_SEARCH:
+            raw_fallback = await exact_name_search(rewritten, self.client)
+            results = _dedup_by_display_name(raw_fallback)
+            if results:
+                print(f"[pipeline] exact_name_search found {len(results)} fallback results")
 
         sources = [r.to_dict() for r in results[:10]]
         yield {"type": "sources", "items": sources, "total": len(sources)}
+
+        # 4.6. Log missed query nếu không có kết quả và là intent crawlable
+        if not results and intent in _CRAWLABLE_INTENTS:
+            try:
+                await log_missed_query(q, rewritten, intent.value, session_id)
+            except Exception as _log_exc:
+                print(f"[pipeline] log_missed_query failed: {type(_log_exc).__name__}: {_log_exc}")
 
         # 3.5. Fallback sang Gemini khi retrieve trả 0 kết quả.
         #
@@ -378,7 +456,9 @@ class RAGPipeline:
         yield {"type": "done"}
 
     async def warmup(self) -> None:
-        """Run one dummy query to pre-load GPU kernels and CUDA cache."""
+        """Run one dummy hotel query để buộc encoder + reranker warmup (tránh CHITCHAT path)."""
         stop = threading.Event()
-        async for _ in self.answer_stream("test", [], stop_event=stop, max_new_tokens=5):
+        async for _ in self.answer_stream(
+            "khách sạn Đà Nẵng", [], stop_event=stop, max_new_tokens=5
+        ):
             pass

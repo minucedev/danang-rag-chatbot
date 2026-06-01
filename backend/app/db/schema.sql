@@ -47,3 +47,22 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_start ON events(start_time);
 CREATE INDEX IF NOT EXISTS idx_events_district ON events(district);
+
+CREATE TABLE IF NOT EXISTS session_context (
+    session_id   TEXT    PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    context_json TEXT    NOT NULL,
+    updated_at   INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS missed_queries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    query           TEXT    NOT NULL,
+    rewritten_query TEXT,
+    intent          TEXT,
+    session_id      TEXT,
+    retry_count     INTEGER DEFAULT 0,
+    status          TEXT    DEFAULT 'pending',
+    created_at      INTEGER NOT NULL,
+    last_tried_at   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_missed_queries_status ON missed_queries(status, created_at);

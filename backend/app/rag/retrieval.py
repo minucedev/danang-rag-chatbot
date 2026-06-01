@@ -52,8 +52,8 @@ async def _fetch_parent_entity(
             }
             _parent_cache[parent_id] = result
             return result
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[retrieval] _fetch_parent_entity({parent_id}): {type(exc).__name__}: {exc}")
     return None
 
 
@@ -207,6 +207,81 @@ async def retrieve_from_collection(
     except Exception as e:
         print(f"Warning: retrieve_from_collection({collection_name}): {e}")
         return []
+
+
+async def exact_name_search(
+    name: str,
+    client: AsyncQdrantClient,
+    limit: int = 5,
+) -> list[SearchResultSchema]:
+    """Tìm kiếm theo tên entity trong 3 collection chính — fallback cho SPECIFIC_SEARCH.
+
+    Dùng Qdrant scroll + MatchText để filter payload field entity_name/place_name.
+    """
+    from qdrant_client.http.models import Filter, FieldCondition, MatchText
+
+    # Lấy từ đầu tiên có nghĩa (≥3 ký tự) làm search token
+    tokens = [w for w in name.split() if len(w) >= 3]
+    if not tokens:
+        return []
+    search_token = tokens[0]
+
+    collections = [
+        config.COLLECTION_ACCOMMODATION_HOTELS,
+        config.COLLECTION_RESTAURANTS,
+        config.COLLECTION_PLACES,
+    ]
+
+    results: list[SearchResultSchema] = []
+    for col in collections:
+        try:
+            scroll_filter = Filter(
+                should=[
+                    FieldCondition(key="entity_name", match=MatchText(text=search_token)),
+                    FieldCondition(key="place_name", match=MatchText(text=search_token)),
+                ]
+            )
+            scroll_result, _ = await client.scroll(
+                collection_name=col,
+                scroll_filter=scroll_filter,
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in scroll_result:
+                payload = point.payload or {}
+
+                def _float(v):
+                    try:
+                        return float(v) if v is not None else None
+                    except (TypeError, ValueError):
+                        return None
+
+                def _int(v):
+                    try:
+                        return int(v) if v is not None else None
+                    except (TypeError, ValueError):
+                        return None
+
+                results.append(SearchResultSchema(
+                    point_id=str(point.id),
+                    collection=col,
+                    score=0.5,
+                    entity_name=payload.get("entity_name", ""),
+                    place_name=payload.get("place_name", ""),
+                    district=payload.get("district", ""),
+                    rating=_float(payload.get("rating")),
+                    min_price=_float(payload.get("min_price_vnd")),
+                    max_price=_float(payload.get("max_price_vnd")),
+                    address=payload.get("address", ""),
+                    content=payload.get("content", ""),
+                    review_count=_int(payload.get("review_count")),
+                    star_rating=_float(payload.get("star_rating")),
+                ))
+        except Exception as exc:
+            print(f"[retrieval] exact_name_search({col}): {type(exc).__name__}: {exc}")
+
+    return results[:limit]
 
 
 async def retrieve_by_intent(

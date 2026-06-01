@@ -69,7 +69,7 @@ class LLMQueryAnalyzer:
             "Chỉ trả về DUY NHẤT một khối JSON. Không giải thích, không thêm text ngoài JSON.\n"
             "Cấu trúc JSON bắt buộc phải tuân theo chính xác schema sau:\n"
             "{\n"
-            '  "intent": "hotel_search" | "restaurant_search" | "place_search" | "review_search" | "event_search" | "general",\n'
+            '  "intent": "hotel_search" | "restaurant_search" | "place_search" | "review_search" | "event_search" | "itinerary_search" | "chitchat" | "general",\n'
             '  "rewritten_query": "chuỗi từ khóa tìm kiếm rút gọn để tạo embedding",\n'
             '  "filters": {\n'
             '    "district": "son tra" | "hai chau" | "ngu hanh son" | "cam le" | "lien chieu" | "thanh khe" | null,\n'
@@ -167,6 +167,34 @@ Trả về JSON:
   }}
 }}
 
+### VÍ DỤ 7:
+Người dùng: "Gợi ý lịch trình 3 ngày 2 đêm Đà Nẵng cho cặp đôi"
+Trả về JSON:
+{{
+  "intent": "itinerary_search",
+  "rewritten_query": "lịch trình 3 ngày cặp đôi Đà Nẵng khách sạn nhà hàng địa điểm",
+  "filters": {{
+    "district": null,
+    "min_rating": null,
+    "max_price": null,
+    "min_price": null
+  }}
+}}
+
+### VÍ DỤ 8:
+Người dùng: "Bạn là ai và có thể giúp gì cho mình?"
+Trả về JSON:
+{{
+  "intent": "chitchat",
+  "rewritten_query": "",
+  "filters": {{
+    "district": null,
+    "min_rating": null,
+    "max_price": null,
+    "min_price": null
+  }}
+}}
+
 ### BÀI TẬP THỰC TẾ:
 Người dùng: "{query}"
 Trả về JSON:"""
@@ -210,7 +238,8 @@ Trả về JSON:"""
                 cleaned_filters["district"] = str(cleaned_filters["district"]).lower().strip()
 
             try:
-                intent_enum = QueryIntent(parsed_json.get("intent", "general"))
+                intent_str = parsed_json.get("intent", "general")
+                intent_enum = QueryIntent(intent_str)
             except ValueError:
                 intent_enum = QueryIntent.GENERAL
 

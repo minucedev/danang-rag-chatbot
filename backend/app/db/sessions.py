@@ -126,3 +126,29 @@ async def update_message_content(message_id: int, content: str) -> None:
         "UPDATE messages SET content = ? WHERE id = ?", (content, message_id)
     )
     await _db_conn().commit()
+
+
+async def get_session_context(session_id: str) -> Optional[dict]:
+    import json
+    async with _db_conn().execute(
+        "SELECT context_json FROM session_context WHERE session_id = ?",
+        (session_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    return json.loads(row["context_json"]) if row else None
+
+
+async def upsert_session_context(session_id: str, context: dict) -> None:
+    import json
+    now = int(time.time())
+    await _db_conn().execute(
+        """
+        INSERT INTO session_context (session_id, context_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+            context_json = excluded.context_json,
+            updated_at   = excluded.updated_at
+        """,
+        (session_id, json.dumps(context, ensure_ascii=False), now),
+    )
+    await _db_conn().commit()

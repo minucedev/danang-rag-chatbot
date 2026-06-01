@@ -40,6 +40,7 @@ def _build_pipeline_stub(monkeypatch, *, results, gemini, local):
         "source": "stub",
     }
     pipeline.analyzer = analyzer
+    pipeline.reranker = None  # reranker=None → skip rerank path
 
     async def _retrieve(**_kw):
         return list(results)

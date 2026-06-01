@@ -47,7 +47,7 @@ DEFAULT_MAX_TOKENS: int = int(os.getenv("DEFAULT_MAX_TOKENS", "512"))
 DEFAULT_TEMPERATURE: float = float(os.getenv("DEFAULT_TEMPERATURE", "0.2"))
 DEFAULT_TOP_K: int = int(os.getenv("DEFAULT_TOP_K", "5"))
 SCORE_THRESHOLD: float = float(os.getenv("SCORE_THRESHOLD", "0.3"))
-MAX_HISTORY_TURNS: int = 2
+MAX_HISTORY_TURNS: int = int(os.getenv("MAX_HISTORY_TURNS", "5"))
 
 # Gemini fallback — khi Qdrant retrieve trả 0 kết quả, gọi Gemini thay vì local LLM.
 GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
@@ -69,3 +69,15 @@ DEFAULT_EVENT_DAYS: int = int(os.getenv("DEFAULT_EVENT_DAYS", "7"))
 DEFAULT_EVENT_LIMIT: int = int(os.getenv("DEFAULT_EVENT_LIMIT", "50"))
 # Bảo vệ POST /api/admin/crawl/events. Empty = endpoint bị disable.
 ADMIN_TOKEN: str = os.getenv("ADMIN_TOKEN", "")
+
+# Reranker — BGE cross-encoder để rerank sau vector search.
+RERANKER_MODEL_NAME: str = os.getenv("RERANKER_MODEL_NAME", "BAAI/bge-reranker-v2-m3")
+TOP_K_RETRIEVE: int = int(os.getenv("TOP_K_RETRIEVE", "15"))
+TOP_K_RERANK: int = int(os.getenv("TOP_K_RERANK", "5"))
+RERANK_SCORE_THRESHOLD: float = float(os.getenv("RERANK_SCORE_THRESHOLD", "0.3"))
+
+# Place crawler — crawl địa điểm từ missed_queries và cập nhật định kỳ.
+PLACE_CRAWL_INTERVAL_HOURS: int = int(os.getenv("PLACE_CRAWL_INTERVAL_HOURS", "4"))
+NEW_PLACES_CRAWL_INTERVAL_HOURS: int = int(os.getenv("NEW_PLACES_CRAWL_INTERVAL_HOURS", "24"))
+MAX_PLACE_RETRY: int = int(os.getenv("MAX_PLACE_RETRY", "3"))
+PLACE_CRAWL_BATCH: int = int(os.getenv("PLACE_CRAWL_BATCH", "10"))

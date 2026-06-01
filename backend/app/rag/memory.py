@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List
+from typing import List, Optional
 from app.utils.nfc import normalize_nfc
 
 # Vietnamese deictic / anaphoric references that signal the query needs prior context
@@ -44,6 +44,34 @@ def build_search_query(history: list[dict], new_query: str) -> str:
         return new_query
 
     return f"{new_query} ({', '.join(names)})"
+
+
+def extract_session_prefs(analysis: dict) -> dict:
+    """Trích xuất preference không-null từ kết quả analyzer để lưu vào session context.
+
+    Chỉ trả về các key có giá trị — không ghi đè existing context bằng null.
+    """
+    prefs: dict = {}
+    filters = analysis.get("filters") or {}
+    for key in ("district", "min_rating", "max_price", "min_price"):
+        val = filters.get(key)
+        if val is not None:
+            prefs[key] = val
+    return prefs
+
+
+def merge_session_prefs(session_context: Optional[dict], merged_filters: dict) -> dict:
+    """Fill None fields trong merged_filters từ session_context (ưu tiên thấp nhất).
+
+    merged_filters đã qua _merge_filters(fe, llm) — session context chỉ fill field còn None.
+    """
+    if not session_context:
+        return merged_filters
+    result = dict(merged_filters)
+    for key in ("district", "min_rating", "max_price", "min_price"):
+        if result.get(key) is None and session_context.get(key) is not None:
+            result[key] = session_context[key]
+    return result
 
 
 def build_history_messages(history: list[dict], max_turns: int = 3) -> list[dict]:
