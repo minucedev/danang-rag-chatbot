@@ -29,7 +29,10 @@ ALL_COLLECTIONS = [
 # Models
 EMBED_MODEL_NAME: str = os.getenv("EMBED_MODEL_NAME", "BAAI/bge-m3")
 
-# llama.cpp GGUF
+# HuggingFace LLM (Qwen3.5-4B via Transformers)
+LLM_HF_MODEL_NAME: str = os.getenv("LLM_HF_MODEL_NAME", "Qwen/Qwen3.5-4B")
+
+# llama.cpp GGUF (legacy — không dùng nữa, giữ để không break .env cũ)
 LLM_GGUF_PATH: str = os.getenv("LLM_GGUF_PATH", "models/qwen2.5-3b-instruct-q4_k_m.gguf")
 LLM_N_CTX: int = int(os.getenv("LLM_N_CTX", "4096"))
 LLM_N_GPU_LAYERS: int = int(os.getenv("LLM_N_GPU_LAYERS", "-1"))

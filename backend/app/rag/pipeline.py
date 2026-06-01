@@ -6,7 +6,7 @@ from typing import AsyncIterator, Optional, List
 
 from qdrant_client import AsyncQdrantClient
 from sentence_transformers import SentenceTransformer
-from llama_cpp import Llama
+from app.rag.llm import QwenHF
 
 from app import config
 from app.rag.intent import QueryIntent
@@ -213,7 +213,7 @@ class RAGPipeline:
     def __init__(
         self,
         encoder: SentenceTransformer,
-        llm: Llama,
+        llm: QwenHF,
         qdrant_client: AsyncQdrantClient,
         reranker=None,
     ) -> None:

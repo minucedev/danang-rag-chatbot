@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
         print(f"[startup] WARNING: Reranker failed to load ({type(exc).__name__}: {exc}). "
               f"Continuing without reranking — result quality will be reduced.")
 
-    print("Loading LLM (llama.cpp)...")
+    print(f"Loading LLM ({config.LLM_HF_MODEL_NAME})...")
     llm = load_llm()
 
     print("Connecting to Qdrant...")
