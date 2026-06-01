@@ -9,6 +9,7 @@ sentence-transformers>=2.6.0
 transformers>=4.44.0
 torch>=2.3.0
 accelerate>=0.27.0
+bitsandbytes>=0.43.0
 # llama-cpp-python>=0.3.2  # replaced by HuggingFace Transformers
 pandas>=2.0.0
 numpy

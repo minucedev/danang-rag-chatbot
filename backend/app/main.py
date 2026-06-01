@@ -11,7 +11,7 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from app import config
 from app.db import sessions as db
-from app.rag.llm import load_llm
+from app.rag.llm import load_llm, load_analyzer_llm
 from app.rag.pipeline import RAGPipeline
 import app.rag.pipeline as pl_module
 from app.crawlers.events_crawler import run_event_crawl
@@ -72,12 +72,30 @@ async def lifespan(app: FastAPI):
               f"Continuing without reranking — result quality will be reduced.")
 
     print(f"Loading LLM ({config.LLM_HF_MODEL_NAME})...")
-    llm = load_llm()
+    try:
+        llm = load_llm()
+    except Exception as exc:
+        raise RuntimeError(
+            f"[startup] FATAL: Failed to load main LLM '{config.LLM_HF_MODEL_NAME}': "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+
+    analyzer_llm = llm
+    if config.ANALYZER_HF_MODEL_NAME != config.LLM_HF_MODEL_NAME:
+        print(f"Loading analyzer model ({config.ANALYZER_HF_MODEL_NAME})...")
+        try:
+            analyzer_llm = load_analyzer_llm()
+        except Exception as exc:
+            print(f"[startup] WARNING: Analyzer model failed ({type(exc).__name__}: {exc}). "
+                  f"Using main LLM for analysis.")
 
     print("Connecting to Qdrant...")
     qdrant = AsyncQdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY, timeout=60)
 
-    pipeline = RAGPipeline(encoder=encoder, llm=llm, qdrant_client=qdrant, reranker=reranker)
+    pipeline = RAGPipeline(
+        encoder=encoder, llm=llm, qdrant_client=qdrant,
+        reranker=reranker, analyzer_llm=analyzer_llm,
+    )
     pl_module._pipeline_instance = pipeline
 
     print("Initializing database...")

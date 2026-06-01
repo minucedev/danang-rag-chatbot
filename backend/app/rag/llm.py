@@ -5,7 +5,10 @@ import threading
 from typing import AsyncIterator, Iterator
 
 import torch
-from transformers import AutoProcessor, AutoModelForImageTextToText, TextIteratorStreamer
+from transformers import (
+    AutoProcessor, AutoModelForImageTextToText, AutoModelForCausalLM,
+    AutoTokenizer, TextIteratorStreamer,
+)
 
 from app import config
 
@@ -90,40 +93,84 @@ class QwenHF:
                 yield {"choices": [{"delta": {"content": chunk}}]}
 
 
-def load_llm() -> QwenHF:
-    """Load Qwen3.5-4B via HuggingFace Transformers.
+def _build_load_kwargs(device: str, dtype, use_4bit: bool = False) -> dict:
+    """Tạo kwargs load model, tuỳ chọn 4-bit quantization."""
+    kwargs = dict(device_map="auto", trust_remote_code=True)
+    if use_4bit and device == "cuda":
+        try:
+            from transformers import BitsAndBytesConfig
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+            )
+            print("  [4-bit quantization enabled]")
+        except (ImportError, RuntimeError, OSError, AttributeError) as bnb_exc:
+            print(f"  [WARNING] 4-bit unavailable ({type(bnb_exc).__name__}: {bnb_exc}) — loading in fp16")
+            kwargs["torch_dtype"] = dtype
+    else:
+        kwargs["torch_dtype"] = dtype
+    return kwargs
 
-    Ưu tiên: local path → HF cache → download.
-    Set LLM_HF_MODEL_NAME thành đường dẫn thư mục để load offline.
+
+def _load_processor_and_model(model_name: str, load_kwargs: dict, is_vlm: bool, local_only: bool = False):
+    """Load processor + model. VLM dùng AutoModelForImageTextToText, text-only dùng AutoModelForCausalLM."""
+    extra = {"trust_remote_code": True}
+    if local_only:
+        extra["local_files_only"] = True
+
+    if is_vlm:
+        processor = AutoProcessor.from_pretrained(model_name, **extra)
+        model = AutoModelForImageTextToText.from_pretrained(model_name, **load_kwargs, **({"local_files_only": True} if local_only else {}))
+    else:
+        processor = AutoTokenizer.from_pretrained(model_name, **extra)
+        model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs, **({"local_files_only": True} if local_only else {}))
+    return processor, model
+
+
+def _load_model_from_name(
+    model_name: str, device: str, dtype, use_4bit: bool = False, is_vlm: bool = True
+) -> QwenHF:
+    """Load QwenHF từ HF model name/local path. Ưu tiên: local → cache → download.
+
+    is_vlm=True: dùng AutoModelForImageTextToText (Qwen3.5-4B VLM)
+    is_vlm=False: dùng AutoModelForCausalLM (Qwen2.5-0.5B text-only)
     """
     import os
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if device == "cuda" else torch.float32
-    model_name = config.LLM_HF_MODEL_NAME
     is_local = os.path.isdir(model_name)
-    load_kwargs = dict(torch_dtype=dtype, device_map="auto", trust_remote_code=True)
+    load_kwargs = _build_load_kwargs(device, dtype, use_4bit)
 
     if is_local:
-        print(f"  Loading LLM from local path: {model_name}")
-        processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
-        model = AutoModelForImageTextToText.from_pretrained(model_name, **load_kwargs)
+        print(f"  Loading from local path: {model_name}")
+        processor, model = _load_processor_and_model(model_name, load_kwargs, is_vlm)
     else:
         try:
-            processor = AutoProcessor.from_pretrained(
-                model_name, local_files_only=True, trust_remote_code=True
-            )
-            model = AutoModelForImageTextToText.from_pretrained(
-                model_name, local_files_only=True, **load_kwargs
-            )
+            processor, model = _load_processor_and_model(model_name, load_kwargs, is_vlm, local_only=True)
             print(f"  Loaded {model_name} from cache (no download needed)")
-        except OSError:
-            print(f"  Downloading {model_name} from HuggingFace...")
-            processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
-            model = AutoModelForImageTextToText.from_pretrained(model_name, **load_kwargs)
+        except OSError as cache_exc:
+            print(f"  [INFO] Cache miss ({type(cache_exc).__name__}) — downloading {model_name}...")
+            processor, model = _load_processor_and_model(model_name, load_kwargs, is_vlm)
 
     model.eval()
     return QwenHF(model=model, processor=processor, device=device)
+
+
+def load_llm() -> QwenHF:
+    """Load generator LLM (Qwen3.5-4B VLM, optional 4-bit)."""
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if device == "cuda" else torch.float32
+    return _load_model_from_name(
+        config.LLM_HF_MODEL_NAME, device, dtype, use_4bit=config.LLM_LOAD_IN_4BIT, is_vlm=True
+    )
+
+
+def load_analyzer_llm() -> QwenHF:
+    """Load analyzer LLM (Qwen2.5-0.5B-Instruct text-only, không dùng 4-bit)."""
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if device == "cuda" else torch.float32
+    return _load_model_from_name(
+        config.ANALYZER_HF_MODEL_NAME, device, dtype, use_4bit=False, is_vlm=False
+    )
 
 
 async def generate_streaming(

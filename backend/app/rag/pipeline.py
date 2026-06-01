@@ -216,12 +216,13 @@ class RAGPipeline:
         llm: QwenHF,
         qdrant_client: AsyncQdrantClient,
         reranker=None,
+        analyzer_llm=None,
     ) -> None:
         self.encoder = encoder
         self.llm = llm
         self.client = qdrant_client
         self.reranker = reranker
-        self.analyzer = LLMQueryAnalyzer(llm)
+        self.analyzer = LLMQueryAnalyzer(analyzer_llm or llm)
 
     async def answer_stream(
         self,
@@ -360,15 +361,9 @@ class RAGPipeline:
             except Exception as _log_exc:
                 print(f"[pipeline] log_missed_query failed: {type(_log_exc).__name__}: {_log_exc}")
 
-        # 3.5. Fallback sang Gemini khi retrieve trả 0 kết quả.
-        #
-        # Quy tắc xử lý lỗi (tránh trộn provider):
-        # - KHÔNG emit `fallback`/disclaimer cho đến khi Gemini chunk đầu tiên về.
-        # - Gemini fail TRƯỚC chunk đầu → silently fall through local LLM (client
-        #   chưa thấy event nào liên quan Gemini → không cần "rollback").
-        # - Gemini fail SAU khi đã có chunk → emit `error`+`done`, KHÔNG fall through
-        #   để không trộn câu trả lời Qwen vào output đã gắn nhãn Gemini.
-        if not results and config.GEMINI_API_KEY:
+        # 3.5. Fallback sang Gemini khi retrieve trả 0 kết quả (chỉ khi không dùng Gemini primary).
+        # Khi USE_GEMINI_GENERATION=True, path này bị skip — Gemini primary xử lý luôn cả no-results.
+        if not results and config.GEMINI_API_KEY and not config.USE_GEMINI_GENERATION:
             gemini_messages = _build_gemini_messages(q, history, intent)
             committed_to_gemini = False
             gemini_tokens = 0
@@ -431,6 +426,49 @@ class RAGPipeline:
         t_before_gen = time.perf_counter()
         first_token_logged = False
         token_count = 0
+
+        # 4.1. Gemini primary generator (nhanh hơn local LLM ~5-10x)
+        if config.USE_GEMINI_GENERATION:
+            gemini_tokens_yielded = 0
+            try:
+                async for token in generate_gemini_streaming(
+                    messages, stop_event,
+                    max_new_tokens=max_new_tokens, temperature=temperature,
+                ):
+                    if not first_token_logged:
+                        t_first = time.perf_counter()
+                        print(f"[TIMING] prefill+first_token (Gemini): {(t_first - t_before_gen)*1000:.0f}ms")
+                        print(f"[TIMING] >>> TTFT: {(t_first - t_start)*1000:.0f}ms")
+                        first_token_logged = True
+                    token_count += 1
+                    gemini_tokens_yielded += 1
+                    yield {"type": "token", "text": token}
+                t_done = time.perf_counter()
+                print(f"[TIMING] generation (Gemini): {(t_done - t_before_gen)*1000:.0f}ms "
+                      f"({token_count} chunks)")
+                print(f"[TIMING] === TOTAL: {(t_done - t_start)*1000:.0f}ms ===")
+                yield {"type": "done"}
+                return
+            except GeminiFallbackError as e:
+                status = f" status={e.status_code}" if e.status_code is not None else ""
+                if gemini_tokens_yielded > 0:
+                    # Đã gửi token cho client — không thể trộn local LLM vào
+                    print(f"[pipeline] Gemini primary failed mid-stream "
+                          f"after {gemini_tokens_yielded} tokens{status}: {e}")
+                    yield {"type": "error", "message": "Kết nối Gemini bị gián đoạn giữa chừng."}
+                    yield {"type": "done"}
+                    return
+                print(f"[pipeline] Gemini primary failed before first token{status}: {e} "
+                      f"— falling back to local LLM")
+                # Thêm disclaimer khi không có kết quả Qdrant và Gemini thất bại
+                if not results:
+                    yield {"type": "token",
+                           "text": "_(Không có dữ liệu nội bộ phù hợp và dịch vụ AI tổng quát không khả dụng.)_\n\n"}
+                first_token_logged = False
+                token_count = 0
+                t_before_gen = time.perf_counter()
+
+        # 4.2. Local LLM generation (primary khi Gemini không configured, hoặc fallback)
         async for token in generate_streaming(
             messages,
             self.llm,

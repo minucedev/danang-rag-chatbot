@@ -52,6 +52,12 @@ DEFAULT_TOP_K: int = int(os.getenv("DEFAULT_TOP_K", "5"))
 SCORE_THRESHOLD: float = float(os.getenv("SCORE_THRESHOLD", "0.3"))
 MAX_HISTORY_TURNS: int = int(os.getenv("MAX_HISTORY_TURNS", "5"))
 
+# 4-bit quantization (giảm VRAM, tăng tốc generation ~30-50%)
+LLM_LOAD_IN_4BIT: bool = os.getenv("LLM_LOAD_IN_4BIT", "false").lower() in ("1", "true", "yes")
+
+# Model nhỏ riêng cho analyzer (default Qwen2.5-0.5B thay vì 4B → analyzer ~0.5s)
+ANALYZER_HF_MODEL_NAME: str = os.getenv("ANALYZER_HF_MODEL_NAME", "Qwen/Qwen2.5-0.5B-Instruct")
+
 # Gemini fallback — khi Qdrant retrieve trả 0 kết quả, gọi Gemini thay vì local LLM.
 GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
@@ -61,6 +67,11 @@ GEMINI_BASE_URL: str = os.getenv(
 GEMINI_TIMEOUT_SECONDS: float = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "30"))
 GEMINI_FALLBACK_PREFIX_DISCLAIMER: bool = (
     os.getenv("GEMINI_FALLBACK_PREFIX_DISCLAIMER", "true").lower() in ("1", "true", "yes")
+)
+# Gemini làm primary generator (auto-enable khi có API key, tắt bằng USE_GEMINI_GENERATION=false)
+USE_GEMINI_GENERATION: bool = (
+    os.getenv("USE_GEMINI_GENERATION", "true").lower() in ("1", "true", "yes")
+    and bool(GEMINI_API_KEY)
 )
 
 # Event crawler (SerpAPI). Crawler chạy định kỳ trong lifespan,
