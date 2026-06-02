@@ -10,18 +10,48 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 from typing import AsyncIterator
 
 import httpx
 
 from app import config
 
+# Circuit breaker deadline (monotonic seconds). Read/write xảy ra trên asyncio event loop
+# thread — single-threaded, không cần lock. 0.0 = không trong cooldown.
+_quota_disabled_until: float = 0.0
+
+
+def _arm_cooldown(status_code: int) -> None:
+    global _quota_disabled_until
+    if status_code == 429:
+        duration = config.GEMINI_QUOTA_COOLDOWN_SECONDS
+    elif status_code == 503:
+        duration = config.GEMINI_503_COOLDOWN_SECONDS
+    else:
+        return
+    if duration <= 0:
+        return
+    new_deadline = time.monotonic() + duration
+    if new_deadline > _quota_disabled_until:
+        _quota_disabled_until = new_deadline
+        human = time.strftime("%H:%M:%S", time.localtime(time.time() + duration))
+        print(
+            f"[gemini-circuit-breaker] OPEN — HTTP {status_code}. "
+            f"Suppressed for {duration:.0f}s (until ~{human})."
+        )
+
 
 class GeminiFallbackError(Exception):
     """Raised khi Gemini không khả dụng — pipeline catch và rơi xuống local LLM.
 
-    `status_code` được set khi lỗi là HTTP non-200 (None nếu transport / timeout / config error).
-    Cho phép caller phân biệt 401 (key sai — nên alert) vs 429/503 (transient — chỉ log).
+    `status_code` được set khi lỗi là HTTP non-200 (None nếu transport/timeout/config error).
+    Cho phép caller phân biệt:
+      - 401: key sai hoặc hết billing — nên alert.
+      - 429/503: transient — chỉ log.
+      - None: transport/timeout error.
+    Lưu ý: status_code=429 cũng được set khi circuit breaker OPEN (không có HTTP call).
+    Cả hai trường hợp đều nghĩa là Gemini tạm thời không khả dụng.
     """
 
     def __init__(self, message: str, status_code: int | None = None) -> None:
@@ -61,8 +91,20 @@ async def generate_gemini_streaming(
     timeout: float | None = None,
 ) -> AsyncIterator[str]:
     """Yield chunk text từ Gemini stream. Cùng signature/style với `generate_streaming`."""
+    global _quota_disabled_until
     if not config.GEMINI_API_KEY:
         raise GeminiFallbackError("GEMINI_API_KEY not configured")
+
+    now = time.monotonic()
+    if now < _quota_disabled_until:
+        remaining = _quota_disabled_until - now
+        raise GeminiFallbackError(
+            f"Gemini circuit breaker OPEN — cooldown active ({remaining:.0f}s remaining)",
+            status_code=429,
+        )
+    elif _quota_disabled_until > 0.0:
+        _quota_disabled_until = 0.0
+        print("[gemini-circuit-breaker] CLOSED — cooldown expired, resuming.")
 
     timeout = timeout if timeout is not None else config.GEMINI_TIMEOUT_SECONDS
     system_instruction, contents = _convert_messages(messages)
@@ -91,6 +133,7 @@ async def generate_gemini_streaming(
                 if resp.status_code != 200:
                     # Đọc body để debug; tránh leak key bằng cách KHÔNG log url.
                     err_body = (await resp.aread()).decode("utf-8", errors="replace")
+                    _arm_cooldown(resp.status_code)
                     raise GeminiFallbackError(
                         f"Gemini HTTP {resp.status_code}: {err_body[:300]}",
                         status_code=resp.status_code,
@@ -107,7 +150,8 @@ async def generate_gemini_streaming(
                         continue
                     try:
                         obj = json.loads(payload)
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as exc:
+                        print(f"[gemini-fallback] SSE JSON parse error (skipping frame): {exc} — payload={payload[:80]!r}")
                         continue
                     # candidates[0].content.parts[*].text
                     for cand in obj.get("candidates", []) or []:
@@ -125,6 +169,10 @@ async def generate_gemini_streaming(
                     raise GeminiFallbackError(
                         "Gemini stream returned no text chunks (possibly safety-blocked or format changed)"
                     )
+    except httpx.TimeoutException as e:
+        # Timeout thường xảy ra khi Gemini throttle bằng cách giữ connection thay vì trả 429.
+        _arm_cooldown(503)
+        raise GeminiFallbackError(f"Gemini timeout: {type(e).__name__}: {e}") from e
     except httpx.HTTPError as e:
         raise GeminiFallbackError(f"Gemini transport error: {type(e).__name__}: {e}") from e
     except asyncio.CancelledError:

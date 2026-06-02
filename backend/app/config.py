@@ -73,6 +73,10 @@ USE_GEMINI_GENERATION: bool = (
     os.getenv("USE_GEMINI_GENERATION", "true").lower() in ("1", "true", "yes")
     and bool(GEMINI_API_KEY)
 )
+# Circuit breaker: thời gian (giây) bỏ qua Gemini sau khi nhận 429 hoặc 503.
+# Set về 0 để tắt circuit breaker.
+GEMINI_QUOTA_COOLDOWN_SECONDS: float = float(os.getenv("GEMINI_QUOTA_COOLDOWN_SECONDS", "3600"))
+GEMINI_503_COOLDOWN_SECONDS: float = float(os.getenv("GEMINI_503_COOLDOWN_SECONDS", "60"))
 
 # Event crawler (SerpAPI). Crawler chạy định kỳ trong lifespan,
 # upsert vào bảng `events` của SQLite. Empty key = crawler bị skip.
