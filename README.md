@@ -22,7 +22,7 @@ FastAPI (http://localhost:8000)
         ├─ BAAI/bge-m3                      embedding (truy vấn vector)
         ├─ BAAI/bge-reranker-v2-m3          cross-encoder reranker
         ├─ Qwen2.5-0.5B-Instruct (HF)       analyzer LLM (intent + filters, nhanh)
-        ├─ Qwen3.5-4B (HF Transformers)     generator LLM (trả lời)
+        ├─ Qwen3.5-4B (GPU) / Qwen2.5-0.5B (CPU)  local generator LLM (fallback)
         ├─ Gemini 2.0 Flash                 primary generator khi có API key (~0.5s TTFT)
         ├─ Qdrant Cloud                     vector DB, 7 collections
         ├─ SQLite local                     sessions, messages, profiles,
@@ -105,12 +105,13 @@ QDRANT_API_KEY=your-api-key
 
 # === MODELS (HuggingFace — tự tải lần đầu) ===
 HF_TOKEN=your-huggingface-token        # khuyến nghị, tránh rate limit
-LLM_HF_MODEL_NAME=Qwen/Qwen3.5-4B             # generator LLM
+LLM_HF_MODEL_NAME=Qwen/Qwen3.5-4B             # generator LLM (đổi sang Qwen2.5-0.5B nếu chạy CPU/ít RAM)
 ANALYZER_HF_MODEL_NAME=Qwen/Qwen2.5-0.5B-Instruct  # analyzer LLM (nhanh hơn)
 LLM_LOAD_IN_4BIT=false                         # true nếu VRAM < 8GB (cần bitsandbytes)
 
 EMBED_MODEL_NAME=BAAI/bge-m3
 RERANKER_MODEL_NAME=BAAI/bge-reranker-v2-m3
+ENABLE_RERANKER=true                           # false để bỏ reranker, tiết kiệm ~2.2GB RAM
 
 # === RETRIEVAL ===
 TOP_K_RETRIEVE=15        # số kết quả lấy từ Qdrant trước rerank
@@ -173,7 +174,8 @@ pip install -r backend/requirements.txt
 
 ```powershell
 cd backend
-uvicorn app.main:app --port 8000
+python -m uvicorn app.main:app --port 8000
+# (nếu `uvicorn` không có trong PATH, dùng `python -m uvicorn` hoặc `..\.venv\Scripts\uvicorn.exe`)
 ```
 
 Chờ đến khi thấy log `Server ready.`. **Lần đầu mất 5-15 phút** do tải models từ HuggingFace:
@@ -189,10 +191,27 @@ Kiểm tra:
 
 ```powershell
 curl http://localhost:8000/api/health
-# Kỳ vọng: {"status":"ok","cuda":true,"qdrant":"ok","reranker":"ok",...}
+# Kỳ vọng (GPU): {"status":"ok","cuda":true,"qdrant":"ok","reranker":"ok",...}
+# Trên CPU:      {"status":"ok","cuda":false,"qdrant":"ok","reranker":"not_loaded",...}
 ```
 
 Swagger UI: `http://localhost:8000/docs`
+
+### 3b. Chạy trên CPU / máy ít RAM (không có GPU)
+
+App vẫn chạy được trên CPU bằng cách dùng **model nhỏ cho local LLM + Gemini làm generator chính**. Sửa `backend/.env`:
+
+```env
+LLM_HF_MODEL_NAME=Qwen/Qwen2.5-0.5B-Instruct   # thay 4B (4B nặng + là VLM, không hợp CPU)
+USE_GEMINI_GENERATION=true                      # Gemini trả lời chính (cần GEMINI_API_KEY)
+GEMINI_MODEL=gemini-2.0-flash
+ENABLE_RERANKER=false                           # tắt reranker, tiết kiệm ~2.2GB RAM
+```
+
+- **PyTorch CPU** là đủ: `pip install torch` (không cần `--index-url .../cu121`).
+- Nếu đã tải sẵn model vào `backend/models/.cache/huggingface`, `main.py` tự set `HF_HUB_OFFLINE=1` để load offline (không gọi mạng, không treo).
+- Câu trả lời chính do Gemini sinh nên nhanh; analyzer/embedding chạy CPU nên query đầu hơi chậm (~15s), các query sau nhanh hơn.
+- Khi Qdrant không có dữ liệu phù hợp, Gemini trả lời từ kiến thức chung (kèm disclaimer).
 
 ### 4. Chạy frontend
 
@@ -269,6 +288,7 @@ Mở `http://localhost:3000`.
 | PUT | `/api/profile/{session_id}` | Tạo/cập nhật profile |
 | DELETE | `/api/profile/{session_id}` | Xóa profile |
 | POST | `/api/recommend` | Gợi ý theo profile |
+| GET | `/api/events` | Danh sách sự kiện sắp tới (app đề xuất chủ động) |
 | GET | `/api/health` | Health check (cuda, qdrant, reranker) |
 | POST | `/api/admin/crawl/events` | Trigger event crawl (`X-Admin-Token` header) |
 | POST | `/api/admin/crawl/places` | Trigger place crawl (`X-Admin-Token` header) |
@@ -292,7 +312,7 @@ PPBL_chat/
 │   │   ├── utils/           nfc.py (Unicode normalize), slugify_vn.py
 │   │   ├── main.py          FastAPI app + lifespan (startup/shutdown)
 │   │   └── config.py        Tất cả env vars
-│   ├── tests/               84 pytest tests (không cần GPU)
+│   ├── tests/               pytest tests (không cần GPU)
 │   ├── data/                chats.db (tự tạo, gitignored)
 │   ├── .env.example
 │   ├── requirements.txt
@@ -320,7 +340,7 @@ PPBL_chat/
 cd backend
 pip install -r requirements-dev.txt
 pytest tests/ -q
-# Kỳ vọng: 84 passed, 2 skipped
+# Kỳ vọng: 113 passed, 1 xfailed
 ```
 
 ### Frontend type check + lint
@@ -352,8 +372,8 @@ npx tsc --noEmit
 **Models:**
 - `BAAI/bge-m3` — multilingual embedding
 - `BAAI/bge-reranker-v2-m3` — cross-encoder reranker
-- `Qwen/Qwen2.5-0.5B-Instruct` — analyzer LLM (intent classification, ~0.5s)
-- `Qwen/Qwen3.5-4B` — generator LLM (response generation, fp16 / 4-bit)
+- `Qwen/Qwen2.5-0.5B-Instruct` — analyzer LLM (intent classification, ~0.5s); cũng dùng làm local generator khi chạy CPU
+- `Qwen/Qwen3.5-4B` — generator LLM cho setup GPU (fp16 / 4-bit)
 - `Gemini 2.0 Flash` — primary generator via API (khuyến nghị, ~0.5-1s TTFT)
 
 **Infrastructure:** Qdrant Cloud · SQLite (WAL) · SerpAPI (Google Events + Local) · HuggingFace Hub
