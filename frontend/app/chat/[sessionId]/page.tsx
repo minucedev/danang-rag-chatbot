@@ -1,6 +1,6 @@
 "use client";
-import { use, Suspense } from "react";
-import { FilterSidebar } from "@/components/filters/FilterSidebar";
+import { use, useState, Suspense } from "react";
+import { FilterChips, FilterPanel } from "@/components/filters/FilterSidebar";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { MessageList } from "@/components/chat/MessageList";
 import { useChat } from "@/hooks/useChat";
@@ -15,12 +15,18 @@ function SessionView({ sessionId }: { sessionId: string }) {
   const { filters } = useFilters();
   const { send, stop, status, streamingMsg } = useChat(sessionId);
   const { data: messages = [] } = useMessagesQuery(sessionId);
+  const [filterOpen, setFilterOpen] = useState(false);
 
   return (
     <div className="flex flex-col h-full">
-      <div className="border-b px-4 py-3 flex items-center justify-between shrink-0">
-        <span className="font-semibold text-sm">Trợ lý du lịch Đà Nẵng</span>
-        <FilterSidebar />
+      {/* Filter chips bar */}
+      <div className="relative">
+        <FilterChips onOpenFilter={() => setFilterOpen((v) => !v)} />
+        {filterOpen && (
+          <div className="absolute right-4 top-full mt-1 z-40">
+            <FilterPanel onClose={() => setFilterOpen(false)} />
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto">

@@ -27,14 +27,17 @@ export function SessionItem({ session, isActive }: Props) {
     <>
       <div
         className={cn(
-          "group flex items-center justify-between rounded-lg px-2 py-1.5 cursor-pointer hover:bg-accent text-sm",
-          isActive && "bg-accent font-medium",
+          "group flex items-center gap-3 rounded-xl px-3 py-2.5 cursor-pointer text-sm transition-colors",
+          isActive
+            ? "bg-primary-container text-on-primary-container font-medium"
+            : "text-on-surface-variant hover:bg-surface-container-high",
         )}
         onClick={() => router.push(`/chat/${session.id}`)}
       >
+        <span className="material-symbols-outlined text-lg shrink-0">history</span>
         <span className="truncate flex-1">{session.title}</span>
         <button
-          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-muted"
+          className="opacity-0 group-hover:opacity-100 p-0.5 rounded-lg hover:bg-black/10 shrink-0"
           onClick={(e) => { e.stopPropagation(); setShowMenu((v) => !v); }}
         >
           <MoreHorizontal className="w-3.5 h-3.5" />

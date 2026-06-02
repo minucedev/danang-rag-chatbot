@@ -204,66 +204,66 @@ Trả về JSON:"""
             {"role": "user", "content": user_prompt}
         ]
 
-        try:
-            completion = self.llm.create_chat_completion(
-                messages=messages,
-                max_tokens=256,
-                temperature=0.0,
-                top_p=1.0,
-                stream=False,
-            )
-            gen_text = completion["choices"][0]["message"]["content"].strip()
+        _fallback = {
+            "intent": QueryIntent.GENERAL,
+            "rewritten_query": query,
+            "filters": {"district": None, "min_rating": None, "max_price": None, "min_price": None},
+            "source": "LLM_Fallback",
+        }
 
-            # Khử nhiễu văn bản bọc ngoài JSON
-            json_match = re.search(r'\{.*\}', gen_text, re.DOTALL)
-            if json_match:
-                parsed_json = json.loads(json_match.group(0))
-            else:
-                parsed_json = json.loads(gen_text)
-
-            # Đảm bảo dọn dẹp và giữ đúng cấu trúc filter mong muốn
-            raw_filters = parsed_json.get("filters", {})
-            if not isinstance(raw_filters, dict):
-                raw_filters = {}
-
-            cleaned_filters = {
-                "district": raw_filters.get("district"),
-                "min_rating": raw_filters.get("min_rating"),
-                "max_price": self._clean_price(raw_filters.get("max_price")),
-                "min_price": self._clean_price(raw_filters.get("min_price"))
-            }
-
-            # Chuẩn hóa district text đầu ra
-            if cleaned_filters["district"]:
-                cleaned_filters["district"] = str(cleaned_filters["district"]).lower().strip()
+        for attempt in range(2):
+            try:
+                completion = self.llm.create_chat_completion(
+                    messages=messages,
+                    max_tokens=256,
+                    temperature=0.0,
+                    top_p=1.0,
+                    stream=False,
+                )
+                gen_text = completion["choices"][0]["message"]["content"].strip()
+            except Exception as e:
+                print(f"  [DEBUG] LLM call failed: {e}. Applying fallback.")
+                return _fallback
 
             try:
-                intent_str = parsed_json.get("intent", "general")
-                intent_enum = QueryIntent(intent_str)
-            except ValueError:
-                intent_enum = QueryIntent.GENERAL
+                # Khử nhiễu văn bản bọc ngoài JSON
+                json_match = re.search(r'\{.*\}', gen_text, re.DOTALL)
+                raw = json_match.group(0) if json_match else gen_text
+                parsed_json = json.loads(raw)
 
-            return {
-                "intent": intent_enum,
-                "rewritten_query": parsed_json.get("rewritten_query", query),
-                "filters": cleaned_filters,
-                "source": "LLM"
-            }
+                # Đảm bảo dọn dẹp và giữ đúng cấu trúc filter mong muốn
+                raw_filters = parsed_json.get("filters", {})
+                if not isinstance(raw_filters, dict):
+                    raw_filters = {}
 
-        except Exception as e:
-            print(f"  [DEBUG] LLM Parsing Error: {e}. Áp dụng Fallback an toàn (Mặc định).")
-            # Khi LLM lỗi và không còn hàm rule-based, ta trả về giá trị mặc định an toàn:
-            # - Intent: GENERAL (tìm kiếm toàn bộ)
-            # - Rewritten query: Dùng luôn câu gốc của người dùng
-            # - Filters: Rỗng (không lọc gì cả)
-            return {
-                "intent": QueryIntent.GENERAL,
-                "rewritten_query": query,
-                "filters": {
-                    "district": None,
-                    "min_rating": None,
-                    "max_price": None,
-                    "min_price": None
-                },
-                "source": "LLM_Fallback"
-            }
+                cleaned_filters = {
+                    "district": raw_filters.get("district"),
+                    "min_rating": raw_filters.get("min_rating"),
+                    "max_price": self._clean_price(raw_filters.get("max_price")),
+                    "min_price": self._clean_price(raw_filters.get("min_price"))
+                }
+
+                # Chuẩn hóa district text đầu ra
+                if cleaned_filters["district"]:
+                    cleaned_filters["district"] = str(cleaned_filters["district"]).lower().strip()
+
+                try:
+                    intent_str = parsed_json.get("intent", "general")
+                    intent_enum = QueryIntent(intent_str)
+                except ValueError:
+                    intent_enum = QueryIntent.GENERAL
+
+                return {
+                    "intent": intent_enum,
+                    "rewritten_query": parsed_json.get("rewritten_query", query),
+                    "filters": cleaned_filters,
+                    "source": "LLM",
+                }
+
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                if attempt == 0:
+                    print(f"  [DEBUG] Parse attempt 1 failed ({e}), retrying...")
+                    continue
+                print(f"  [DEBUG] Parse failed after retry: {e}. Applying fallback.")
+
+        return _fallback

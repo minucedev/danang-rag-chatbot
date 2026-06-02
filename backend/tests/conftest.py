@@ -12,7 +12,17 @@ from pathlib import Path
 os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
 os.environ.setdefault("QDRANT_API_KEY", "test-dummy")
 
+import pytest
 import pytest_asyncio
+
+
+@pytest.fixture(autouse=True)
+def _reset_gemini_circuit_breaker():
+    """Circuit breaker của Gemini là module-global → reset trước mỗi test để tránh
+    rò rỉ cooldown giữa các test (1 test arm 429/503 sẽ làm test sau OPEN nhầm)."""
+    from app.rag import gemini_fallback
+    gemini_fallback._quota_disabled_until = 0.0
+    yield
 
 
 @pytest_asyncio.fixture

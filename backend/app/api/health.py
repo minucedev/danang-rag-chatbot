@@ -17,7 +17,7 @@ async def health():
     pipeline = getattr(pl_module, "_pipeline_instance", None)
     reranker_ok = False
     if pipeline:
-        model_name = type(pipeline.model).__name__
+        model_name = type(pipeline.llm).__name__
         reranker_ok = pipeline.reranker is not None
         try:
             await pipeline.client.get_collections()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import time
+from difflib import SequenceMatcher
 from typing import List, Optional
 
 from qdrant_client import AsyncQdrantClient
@@ -209,6 +210,10 @@ async def retrieve_from_collection(
         return []
 
 
+def _fuzzy_name_score(query_slug: str, candidate: str) -> float:
+    return SequenceMatcher(None, query_slug, slugify_vn(candidate)).ratio()
+
+
 async def exact_name_search(
     name: str,
     client: AsyncQdrantClient,
@@ -216,15 +221,24 @@ async def exact_name_search(
 ) -> list[SearchResultSchema]:
     """Tìm kiếm theo tên entity trong 3 collection chính — fallback cho SPECIFIC_SEARCH.
 
-    Dùng Qdrant scroll + MatchText để filter payload field entity_name/place_name.
+    Dùng Qdrant scroll + MatchText với nhiều token (bao gồm cả slug không dấu),
+    sau đó re-rank theo fuzzy similarity với tên gốc.
     """
     from qdrant_client.http.models import Filter, FieldCondition, MatchText
 
-    # Lấy từ đầu tiên có nghĩa (≥3 ký tự) làm search token
     tokens = [w for w in name.split() if len(w) >= 3]
     if not tokens:
         return []
-    search_token = tokens[0]
+
+    # Build search tokens: dùng tối đa 3 token đầu + phiên bản không dấu
+    slug_name = slugify_vn(name)
+    search_tokens: list[str] = []
+    for t in tokens[:3]:
+        search_tokens.append(t)
+        slug_t = slugify_vn(t)
+        if slug_t != t.lower():
+            search_tokens.append(slug_t)
+    search_tokens = list(dict.fromkeys(search_tokens))  # dedup, preserve order
 
     collections = [
         config.COLLECTION_ACCOMMODATION_HOTELS,
@@ -232,56 +246,81 @@ async def exact_name_search(
         config.COLLECTION_PLACES,
     ]
 
-    results: list[SearchResultSchema] = []
+    seen_ids: dict[str, tuple] = {}  # point_id → (collection, point)
     for col in collections:
         try:
-            scroll_filter = Filter(
-                should=[
-                    FieldCondition(key="entity_name", match=MatchText(text=search_token)),
-                    FieldCondition(key="place_name", match=MatchText(text=search_token)),
-                ]
-            )
+            conditions = []
+            for token in search_tokens:
+                conditions.append(FieldCondition(key="entity_name", match=MatchText(text=token)))
+                conditions.append(FieldCondition(key="place_name", match=MatchText(text=token)))
+
             scroll_result, _ = await client.scroll(
                 collection_name=col,
-                scroll_filter=scroll_filter,
-                limit=limit,
+                scroll_filter=Filter(should=conditions),
+                limit=limit * 4,
                 with_payload=True,
                 with_vectors=False,
             )
             for point in scroll_result:
-                payload = point.payload or {}
-
-                def _float(v):
-                    try:
-                        return float(v) if v is not None else None
-                    except (TypeError, ValueError):
-                        return None
-
-                def _int(v):
-                    try:
-                        return int(v) if v is not None else None
-                    except (TypeError, ValueError):
-                        return None
-
-                results.append(SearchResultSchema(
-                    point_id=str(point.id),
-                    collection=col,
-                    score=0.5,
-                    entity_name=payload.get("entity_name", ""),
-                    place_name=payload.get("place_name", ""),
-                    district=payload.get("district", ""),
-                    rating=_float(payload.get("rating")),
-                    min_price=_float(payload.get("min_price_vnd")),
-                    max_price=_float(payload.get("max_price_vnd")),
-                    address=payload.get("address", ""),
-                    content=payload.get("content", ""),
-                    review_count=_int(payload.get("review_count")),
-                    star_rating=_float(payload.get("star_rating")),
-                ))
+                pid = str(point.id)
+                if pid not in seen_ids:
+                    seen_ids[pid] = (col, point)
         except Exception as exc:
             print(f"[retrieval] exact_name_search({col}): {type(exc).__name__}: {exc}")
 
-    return results[:limit]
+    # Re-rank by fuzzy similarity, discard candidates below threshold
+    _MIN_SCORE = 0.3
+    scored = sorted(
+        (
+            (
+                _fuzzy_name_score(
+                    slug_name,
+                    (point.payload or {}).get("entity_name") or (point.payload or {}).get("place_name") or "",
+                ),
+                col,
+                point,
+            )
+            for col, point in seen_ids.values()
+        ),
+        key=lambda t: t[0],  # chỉ sort theo score — tránh so sánh point (không orderable) khi điểm bằng nhau
+        reverse=True,
+    )
+
+    results: list[SearchResultSchema] = []
+    for score, col, point in scored[:limit]:
+        if score < _MIN_SCORE:
+            break  # đã sort descending, các phần tử còn lại cũng < threshold
+        payload = point.payload or {}
+
+        def _float(v):
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        def _int(v):
+            try:
+                return int(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        results.append(SearchResultSchema(
+            point_id=str(point.id),
+            collection=col,
+            score=0.5,
+            entity_name=payload.get("entity_name", ""),
+            place_name=payload.get("place_name", ""),
+            district=payload.get("district", ""),
+            rating=_float(payload.get("rating")),
+            min_price=_float(payload.get("min_price_vnd")),
+            max_price=_float(payload.get("max_price_vnd")),
+            address=payload.get("address", ""),
+            content=payload.get("content", ""),
+            review_count=_int(payload.get("review_count")),
+            star_rating=_float(payload.get("star_rating")),
+        ))
+
+    return results
 
 
 async def retrieve_by_intent(

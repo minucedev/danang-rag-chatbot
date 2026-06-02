@@ -17,7 +17,7 @@ interface AssistantBubbleProps {
 export function UserBubble({ content }: UserBubbleProps) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[75%] rounded-2xl rounded-tr-sm bg-blue-600 text-white px-4 py-2.5 text-sm">
+      <div className="max-w-[75%] rounded-2xl chat-bubble-user bg-primary text-on-primary px-5 py-3 text-sm leading-relaxed shadow-sm">
         {content}
       </div>
     </div>
@@ -26,31 +26,48 @@ export function UserBubble({ content }: UserBubbleProps) {
 
 export function AssistantBubble({ content, sources, intent, isStreaming }: AssistantBubbleProps) {
   return (
-    <div className="flex flex-col gap-2 max-w-[85%]">
-      {intent && <IntentBadge value={intent} />}
+    <div className="flex gap-3 max-w-[88%]">
+      {/* AI Avatar */}
+      <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shrink-0 shadow-md mt-1">
+        <span
+          className="material-symbols-outlined text-on-primary text-xl"
+          style={{ fontVariationSettings: "'FILL' 1" }}
+        >
+          smart_toy
+        </span>
+      </div>
 
-      {/* Sources skeleton while streaming + no sources yet */}
-      {isStreaming && !sources && (
-        <div className="flex gap-2">
-          {[1, 2, 3].map((i) => <Skeleton key={i} className="w-56 h-28 rounded-lg shrink-0" />)}
+      <div className="flex flex-col gap-2 min-w-0 flex-1">
+        {intent && <IntentBadge value={intent} />}
+
+        {/* Sources skeleton while streaming + no sources yet */}
+        {isStreaming && !sources && (
+          <div className="flex gap-3">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="w-60 h-32 rounded-xl shrink-0" />
+            ))}
+          </div>
+        )}
+        {sources && sources.length > 0 && <SourceCardList sources={sources} />}
+        {sources && sources.length === 0 && !isStreaming && (
+          <p className="text-xs text-on-surface-variant italic">
+            Không tìm thấy kết quả phù hợp với bộ lọc hiện tại.
+          </p>
+        )}
+
+        {/* Message bubble */}
+        <div className="bg-surface-container-lowest border border-outline-variant/10 shadow-sm rounded-2xl chat-bubble-ai px-5 py-3 text-sm leading-relaxed prose prose-sm max-w-none">
+          {content ? (
+            <ReactMarkdown>{content}</ReactMarkdown>
+          ) : isStreaming ? (
+            <span className="inline-flex gap-1 py-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce [animation-delay:0ms]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce [animation-delay:150ms]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce [animation-delay:300ms]" />
+            </span>
+          ) : null}
+          {isStreaming && content && <span className="animate-pulse text-primary">▋</span>}
         </div>
-      )}
-      {sources && sources.length > 0 && <SourceCardList sources={sources} />}
-      {sources && sources.length === 0 && !isStreaming && (
-        <p className="text-xs text-muted-foreground italic">Không tìm thấy kết quả phù hợp với bộ lọc hiện tại.</p>
-      )}
-
-      <div className="rounded-2xl rounded-tl-sm bg-muted px-4 py-2.5 text-sm prose prose-sm max-w-none dark:prose-invert">
-        {content ? (
-          <ReactMarkdown>{content}</ReactMarkdown>
-        ) : isStreaming ? (
-          <span className="inline-flex gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:0ms]" />
-            <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:150ms]" />
-            <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:300ms]" />
-          </span>
-        ) : null}
-        {isStreaming && content && <span className="animate-pulse">▋</span>}
       </div>
     </div>
   );

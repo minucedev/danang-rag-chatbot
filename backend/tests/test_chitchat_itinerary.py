@@ -5,14 +5,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytest.importorskip("llama_cpp", reason="pipeline tests require llama-cpp-python")
+# pipeline.py import transformers/torch ở top-level → skip nếu env nhẹ chưa cài.
+pytest.importorskip("transformers", reason="pipeline tests require transformers")
 
+from app import config  # noqa: E402
 from app.rag import pipeline as pl_module  # noqa: E402
 from app.rag.intent import QueryIntent  # noqa: E402
 
 
 def _make_stub(monkeypatch, intent: QueryIntent, retrieve_results=None):
     """Build pipeline stub với intent cụ thể."""
+    # Pin về local generator để test độc lập với .env (tránh gọi Gemini thật).
+    monkeypatch.setattr(config, "USE_GEMINI_GENERATION", False)
     pipeline = pl_module.RAGPipeline.__new__(pl_module.RAGPipeline)
     pipeline.encoder = MagicMock()
     pipeline.llm = MagicMock()

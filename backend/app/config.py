@@ -75,7 +75,7 @@ USE_GEMINI_GENERATION: bool = (
 )
 # Circuit breaker: thời gian (giây) bỏ qua Gemini sau khi nhận 429 hoặc 503.
 # Set về 0 để tắt circuit breaker.
-GEMINI_QUOTA_COOLDOWN_SECONDS: float = float(os.getenv("GEMINI_QUOTA_COOLDOWN_SECONDS", "3600"))
+GEMINI_QUOTA_COOLDOWN_SECONDS: float = float(os.getenv("GEMINI_QUOTA_COOLDOWN_SECONDS", "300"))
 GEMINI_503_COOLDOWN_SECONDS: float = float(os.getenv("GEMINI_503_COOLDOWN_SECONDS", "60"))
 
 # Event crawler (SerpAPI). Crawler chạy định kỳ trong lifespan,
@@ -89,6 +89,8 @@ DEFAULT_EVENT_LIMIT: int = int(os.getenv("DEFAULT_EVENT_LIMIT", "50"))
 ADMIN_TOKEN: str = os.getenv("ADMIN_TOKEN", "")
 
 # Reranker — BGE cross-encoder để rerank sau vector search.
+# Tắt (ENABLE_RERANKER=false) để tiết kiệm ~2.2GB RAM trên máy ít bộ nhớ.
+ENABLE_RERANKER: bool = os.getenv("ENABLE_RERANKER", "true").lower() in ("1", "true", "yes")
 RERANKER_MODEL_NAME: str = os.getenv("RERANKER_MODEL_NAME", "BAAI/bge-reranker-v2-m3")
 TOP_K_RETRIEVE: int = int(os.getenv("TOP_K_RETRIEVE", "15"))
 TOP_K_RERANK: int = int(os.getenv("TOP_K_RERANK", "5"))

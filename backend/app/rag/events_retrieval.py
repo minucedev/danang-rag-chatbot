@@ -52,6 +52,7 @@ def _to_source_dict(row: dict) -> dict:
         "end_time": row.get("end_time"),
         "time_display": _format_event_time(row.get("start_time"), row.get("end_time")),
         "url": row.get("url"),
+        "image_url": row.get("image_url"),
         "source": row.get("source"),
         "description": row.get("description"),
     }

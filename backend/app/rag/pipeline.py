@@ -69,6 +69,13 @@ _GEMINI_SYSTEM_PROMPT = (
 )
 
 
+# Disclaimer prefix khi trả lời từ kiến thức chung của Gemini (không có dữ liệu nội bộ).
+_NO_DATA_DISCLAIMER = (
+    "_(Chưa có dữ liệu nội bộ cho mục này — đây là gợi ý tổng quát từ AI, "
+    "vui lòng kiểm chứng thông tin chi tiết.)_\n\n"
+)
+
+
 def _build_gemini_messages(
     query: str,
     history: list[dict],
@@ -429,10 +436,17 @@ class RAGPipeline:
 
         # 4.1. Gemini primary generator (nhanh hơn local LLM ~5-10x)
         if config.USE_GEMINI_GENERATION:
+            # Không có dữ liệu nội bộ → để Gemini trả lời từ kiến thức chung (kèm disclaimer)
+            # thay vì bám reference rỗng rồi báo "không tìm thấy". Missed query vẫn được log
+            # ở trên để crawler bổ sung địa điểm thật sau.
+            gen_messages = messages if results else _build_gemini_messages(q, history, intent)
+            # Disclaimer chỉ phát khi Gemini thực sự ra token đầu tiên — tránh trùng/mâu
+            # thuẫn với disclaimer ở nhánh Gemini fail-trước-token bên dưới.
+            disclaimer_pending = (not results and config.GEMINI_FALLBACK_PREFIX_DISCLAIMER)
             gemini_tokens_yielded = 0
             try:
                 async for token in generate_gemini_streaming(
-                    messages, stop_event,
+                    gen_messages, stop_event,
                     max_new_tokens=max_new_tokens, temperature=temperature,
                 ):
                     if not first_token_logged:
@@ -440,6 +454,9 @@ class RAGPipeline:
                         print(f"[TIMING] prefill+first_token (Gemini): {(t_first - t_before_gen)*1000:.0f}ms")
                         print(f"[TIMING] >>> TTFT: {(t_first - t_start)*1000:.0f}ms")
                         first_token_logged = True
+                    if disclaimer_pending:
+                        yield {"type": "token", "text": _NO_DATA_DISCLAIMER}
+                        disclaimer_pending = False
                     token_count += 1
                     gemini_tokens_yielded += 1
                     yield {"type": "token", "text": token}

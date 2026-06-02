@@ -1,15 +1,84 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f9fb;
+  --foreground: #191c1e;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  /* MD3 Color Palette */
+  --color-primary: #00327d;
+  --color-primary-container: #0047ab;
+  --color-primary-fixed: #dae2ff;
+  --color-primary-fixed-dim: #b1c5ff;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #a5bdff;
+  --color-on-primary-fixed: #001946;
+
+  --color-secondary: #7c5800;
+  --color-secondary-container: #feb700;
+  --color-secondary-fixed: #ffdea8;
+  --color-on-secondary: #ffffff;
+  --color-on-secondary-container: #6b4b00;
+
+  --color-tertiary: #003c51;
+  --color-tertiary-container: #005471;
+  --color-tertiary-fixed: #c2e8ff;
+  --color-on-tertiary: #ffffff;
+  --color-on-tertiary-fixed-variant: #004d67;
+
+  --color-surface: #f7f9fb;
+  --color-surface-bright: #f7f9fb;
+  --color-surface-dim: #d8dadc;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f2f4f6;
+  --color-surface-container: #eceef0;
+  --color-surface-container-high: #e6e8ea;
+  --color-surface-container-highest: #e0e3e5;
+  --color-surface-variant: #e0e3e5;
+  --color-surface-tint: #2559bd;
+
+  --color-outline: #737784;
+  --color-outline-variant: #c3c6d5;
+
+  --color-on-surface: #191c1e;
+  --color-on-surface-variant: #434653;
+  --color-on-background: #191c1e;
+
+  --color-inverse-surface: #2d3133;
+  --color-inverse-on-surface: #eff1f3;
+  --color-inverse-primary: #b1c5ff;
+
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
+  --color-on-error: #ffffff;
 }
 
+/* Material Symbols Outlined font helper */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  display: inline-block;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  word-wrap: normal;
+  white-space: nowrap;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar utilities */
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Chat bubble corner overrides */
+.chat-bubble-ai { border-bottom-left-radius: 4px !important; }
+.chat-bubble-user { border-bottom-right-radius: 4px !important; }
 
 body {
   background: var(--background);

@@ -1,14 +1,19 @@
 "use client";
 import { useEffect, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
-import { MessageSquare } from "lucide-react";
 import { QuickReplies } from "@/components/chat/QuickReplies";
+import { SuggestedEvents } from "@/components/chat/SuggestedEvents";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { MessageList } from "@/components/chat/MessageList";
-import { FilterSidebar } from "@/components/filters/FilterSidebar";
 import { useChat } from "@/hooks/useChat";
 import { useFilters } from "@/hooks/useFilters";
 import { useMessagesQuery } from "@/hooks/useSessions";
+
+const WELCOME_QUICK_ACTIONS = [
+  '"Khách sạn gần biển"',
+  '"Dưới 1.5M VND"',
+  '"Có hồ bơi"',
+];
 
 function NewChatView() {
   const router = useRouter();
@@ -32,31 +37,49 @@ function NewChatView() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="border-b px-4 py-3 flex items-center justify-between shrink-0">
-        <span className="font-semibold text-sm">Trợ lý du lịch Đà Nẵng</span>
-        <FilterSidebar />
-      </div>
-
       <div className="flex-1 overflow-y-auto">
         {showWelcome ? (
-          <div className="flex flex-col items-center justify-center h-full gap-6 p-8">
-            <div className="text-center space-y-2">
-              <MessageSquare className="w-12 h-12 text-blue-600 mx-auto" />
-              <h2 className="text-xl font-semibold">Xin chào!</h2>
-              <p className="text-muted-foreground text-sm">
-                Tôi là trợ lý du lịch Đà Nẵng. Bạn cần tìm gì hôm nay?
-              </p>
-            </div>
-            <div className="w-full max-w-2xl">
-              <QuickReplies onSelect={handleSend} />
-            </div>
+          <div className="max-w-4xl mx-auto px-4 py-10 space-y-10">
+            {/* Greeting section */}
+            <section className="flex flex-col items-center text-center space-y-5">
+              <div className="relative">
+                <div className="w-24 h-24 bg-primary text-on-primary rounded-2xl flex items-center justify-center shadow-lg hover:scale-105 transition-transform duration-300">
+                  <span
+                    className="material-symbols-outlined text-5xl"
+                    style={{ fontVariationSettings: "'FILL' 1" }}
+                  >
+                    smart_toy
+                  </span>
+                </div>
+                <div className="absolute -bottom-1 -right-1 w-8 h-8 bg-secondary-container rounded-full border-4 border-background flex items-center justify-center shadow-sm">
+                  <span className="material-symbols-outlined text-sm text-on-surface">bolt</span>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-2xl font-bold text-primary tracking-tight">
+                  Xin chào! Tôi là trợ lý du lịch Đà Nẵng.
+                </h2>
+                <p className="text-on-surface-variant text-base">Bạn cần tìm gì hôm nay?</p>
+              </div>
+            </section>
+
+            {/* Suggested events */}
+            <SuggestedEvents onSelect={handleSend} />
+
+            {/* Quick reply grid */}
+            <QuickReplies onSelect={handleSend} />
           </div>
         ) : (
           <MessageList messages={messages} streamingMsg={streamingMsg} />
         )}
       </div>
 
-      <ChatInput status={status} onSend={handleSend} onStop={stop} />
+      <ChatInput
+        status={status}
+        onSend={handleSend}
+        onStop={stop}
+        quickActions={showWelcome ? WELCOME_QUICK_ACTIONS : undefined}
+      />
     </div>
   );
 }

@@ -1,4 +1,26 @@
 from __future__ import annotations
+
+# stdout/stderr về UTF-8: trên Windows mặc định cp1252 → print() chứa tiếng Việt
+# crash UnicodeEncodeError (vd làm crawler 500). errors="replace" để không bao giờ raise.
+import sys
+for _s in (sys.stdout, sys.stderr):
+    # reconfigure chỉ có trên TextIOWrapper thật; khi stdout bị wrap (pytest capture,
+    # một số ASGI launcher) sẽ raise AttributeError/ValueError — bỏ qua nhưng để lại dấu vết.
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError) as _exc:
+        print(f"[startup] stdout reconfigure skipped: {type(_exc).__name__}: {_exc}")
+
+# HF cache phải set TRƯỚC khi import transformers/torch để load offline từ cache local
+# (tránh treo do gọi mạng tới HuggingFace). setdefault để vẫn override được qua env.
+import os
+from pathlib import Path
+os.environ.setdefault(
+    "HF_HUB_CACHE",
+    str(Path(__file__).resolve().parent.parent / "models" / ".cache" / "huggingface"),
+)
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -52,7 +74,7 @@ async def _scheduled_new_places_crawl() -> None:
     except Exception as exc:
         print(f"[scheduler] new_places_crawl FAILED: {type(exc).__name__}: {exc}")
 
-from app.api import chat, sessions, health, profile, recommend, admin
+from app.api import chat, sessions, health, profile, recommend, admin, events
 
 
 @asynccontextmanager
@@ -63,13 +85,16 @@ async def lifespan(app: FastAPI):
     print("Loading embedding model...")
     encoder = SentenceTransformer(config.EMBED_MODEL_NAME, device=device)
 
-    print("Loading reranker model...")
     reranker = None
-    try:
-        reranker = CrossEncoder(config.RERANKER_MODEL_NAME, max_length=512, device=device)
-    except Exception as exc:
-        print(f"[startup] WARNING: Reranker failed to load ({type(exc).__name__}: {exc}). "
-              f"Continuing without reranking — result quality will be reduced.")
+    if config.ENABLE_RERANKER:
+        print("Loading reranker model...")
+        try:
+            reranker = CrossEncoder(config.RERANKER_MODEL_NAME, max_length=512, device=device)
+        except Exception as exc:
+            print(f"[startup] WARNING: Reranker failed to load ({type(exc).__name__}: {exc}). "
+                  f"Continuing without reranking — result quality will be reduced.")
+    else:
+        print("Reranker disabled (ENABLE_RERANKER=false) — skipping to save memory.")
 
     print(f"Loading LLM ({config.LLM_HF_MODEL_NAME})...")
     try:
@@ -158,6 +183,7 @@ app.include_router(health.router)
 app.include_router(profile.router)
 app.include_router(recommend.router)
 app.include_router(admin.router)
+app.include_router(events.router)
 
 # Module-level placeholder so health.py can check before pipeline loads
 pl_module._pipeline_instance = None

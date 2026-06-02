@@ -127,53 +127,72 @@ async def generate_gemini_streaming(
     )
     params = {"alt": "sse", "key": config.GEMINI_API_KEY}
 
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            async with client.stream("POST", url, params=params, json=body) as resp:
-                if resp.status_code != 200:
-                    # Đọc body để debug; tránh leak key bằng cách KHÔNG log url.
-                    err_body = (await resp.aread()).decode("utf-8", errors="replace")
-                    _arm_cooldown(resp.status_code)
-                    raise GeminiFallbackError(
-                        f"Gemini HTTP {resp.status_code}: {err_body[:300]}",
-                        status_code=resp.status_code,
-                    )
+    _BACKOFF = [1, 2]  # giây chờ trước attempt 2 và 3
+    # yielded_any theo dõi toàn bộ vòng lặp: nếu đã stream partial thì không retry
+    # (tránh gửi duplicate tokens tới client).
+    yielded_any = False
 
-                yielded_any = False
-                async for raw_line in resp.aiter_lines():
-                    if stop_event.is_set():
-                        break
-                    if not raw_line or not raw_line.startswith("data:"):
-                        continue
-                    payload = raw_line[len("data:"):].strip()
-                    if not payload or payload == "[DONE]":
-                        continue
-                    try:
-                        obj = json.loads(payload)
-                    except json.JSONDecodeError as exc:
-                        print(f"[gemini-fallback] SSE JSON parse error (skipping frame): {exc} — payload={payload[:80]!r}")
-                        continue
-                    # candidates[0].content.parts[*].text
-                    for cand in obj.get("candidates", []) or []:
-                        parts = (cand.get("content") or {}).get("parts") or []
-                        for p in parts:
-                            text = p.get("text")
-                            if text:
-                                yielded_any = True
-                                yield text
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for attempt in range(3):
+            if attempt > 0:
+                await asyncio.sleep(_BACKOFF[attempt - 1])
 
-                # Nếu stream kết thúc bình thường nhưng không có text nào (wire-format
-                # thay đổi, hoặc safety filter chặn) → raise để pipeline biết fallback
-                # thất bại và dùng local LLM thay vì trả bubble rỗng.
-                if not yielded_any and not stop_event.is_set():
-                    raise GeminiFallbackError(
-                        "Gemini stream returned no text chunks (possibly safety-blocked or format changed)"
-                    )
-    except httpx.TimeoutException as e:
-        # Timeout thường xảy ra khi Gemini throttle bằng cách giữ connection thay vì trả 429.
-        _arm_cooldown(503)
-        raise GeminiFallbackError(f"Gemini timeout: {type(e).__name__}: {e}") from e
-    except httpx.HTTPError as e:
-        raise GeminiFallbackError(f"Gemini transport error: {type(e).__name__}: {e}") from e
-    except asyncio.CancelledError:
-        raise
+            try:
+                async with client.stream("POST", url, params=params, json=body) as resp:
+                    if resp.status_code != 200:
+                        # Đọc body để debug; tránh leak key bằng cách KHÔNG log url.
+                        err_body = (await resp.aread()).decode("utf-8", errors="replace")
+                        if resp.status_code == 503 and attempt < 2:
+                            print(f"[gemini] 503 attempt {attempt+1}/3, retrying in {_BACKOFF[attempt]}s...")
+                            continue
+                        _arm_cooldown(resp.status_code)
+                        raise GeminiFallbackError(
+                            f"Gemini HTTP {resp.status_code}: {err_body[:300]}",
+                            status_code=resp.status_code,
+                        )
+
+                    async for raw_line in resp.aiter_lines():
+                        if stop_event.is_set():
+                            break
+                        if not raw_line or not raw_line.startswith("data:"):
+                            continue
+                        payload = raw_line[len("data:"):].strip()
+                        if not payload or payload == "[DONE]":
+                            continue
+                        try:
+                            obj = json.loads(payload)
+                        except json.JSONDecodeError as exc:
+                            print(f"[gemini-fallback] SSE JSON parse error (skipping frame): {exc} — payload={payload[:80]!r}")
+                            continue
+                        # candidates[0].content.parts[*].text
+                        for cand in obj.get("candidates", []) or []:
+                            parts = (cand.get("content") or {}).get("parts") or []
+                            for p in parts:
+                                text = p.get("text")
+                                if text:
+                                    yielded_any = True
+                                    yield text
+
+                    # Nếu stream kết thúc bình thường nhưng không có text nào (wire-format
+                    # thay đổi, hoặc safety filter chặn) → raise để pipeline biết fallback
+                    # thất bại và dùng local LLM thay vì trả bubble rỗng.
+                    if not yielded_any and not stop_event.is_set():
+                        raise GeminiFallbackError(
+                            "Gemini stream returned no text chunks (possibly safety-blocked or format changed)"
+                        )
+                    return  # Stream thành công, thoát retry loop
+
+            except GeminiFallbackError:
+                raise
+            except httpx.TimeoutException as e:
+                # Timeout thường xảy ra khi Gemini throttle bằng cách giữ connection thay vì trả 429.
+                # Không retry nếu đã bắt đầu stream: tránh gửi duplicate tokens tới client.
+                if attempt < 2 and not yielded_any:
+                    print(f"[gemini] Timeout attempt {attempt+1}/3, retrying in {_BACKOFF[attempt]}s...")
+                    continue
+                _arm_cooldown(503)
+                raise GeminiFallbackError(f"Gemini timeout: {type(e).__name__}: {e}") from e
+            except httpx.HTTPError as e:
+                raise GeminiFallbackError(f"Gemini transport error: {type(e).__name__}: {e}") from e
+            except asyncio.CancelledError:
+                raise

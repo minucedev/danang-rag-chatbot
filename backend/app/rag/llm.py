@@ -140,8 +140,8 @@ def _load_model_from_name(
 ) -> QwenHF:
     """Load QwenHF từ HF model name/local path. Ưu tiên: local → cache → download.
 
-    is_vlm=True: dùng AutoModelForImageTextToText (Qwen3.5-4B VLM)
-    is_vlm=False: dùng AutoModelForCausalLM (Qwen2.5-0.5B text-only)
+    is_vlm=True: dùng AutoModelForImageTextToText (vision-language model)
+    is_vlm=False: dùng AutoModelForCausalLM (text-only model)
     """
     import os
 
@@ -164,11 +164,11 @@ def _load_model_from_name(
 
 
 def load_llm() -> QwenHF:
-    """Load generator LLM (Qwen3.5-4B VLM, optional 4-bit)."""
+    """Load generator LLM (text-only, model từ config.LLM_HF_MODEL_NAME, optional 4-bit)."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
     return _load_model_from_name(
-        config.LLM_HF_MODEL_NAME, device, dtype, use_4bit=config.LLM_LOAD_IN_4BIT, is_vlm=True
+        config.LLM_HF_MODEL_NAME, device, dtype, use_4bit=config.LLM_LOAD_IN_4BIT, is_vlm=False
     )
 
 

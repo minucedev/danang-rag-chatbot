@@ -13,9 +13,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# pipeline.py imports llama_cpp ở top-level; skip cả file nếu dep chưa cài (môi
-# trường dev/CI nhẹ chưa cần GPU runtime). Khi llama-cpp-python có mặt thì chạy đầy đủ.
-pytest.importorskip("llama_cpp", reason="pipeline tests require llama-cpp-python")
+# pipeline.py import transformers/torch ở top-level (qua llm.py) → skip nếu env nhẹ
+# chưa cài (CI không GPU). Khi có thì chạy đầy đủ.
+pytest.importorskip("transformers", reason="pipeline tests require transformers")
 
 from app import config  # noqa: E402
 from app.rag import pipeline as pl_module  # noqa: E402
@@ -23,10 +23,13 @@ from app.rag.gemini_fallback import GeminiFallbackError  # noqa: E402
 from app.rag.intent import QueryIntent  # noqa: E402
 
 
-def _build_pipeline_stub(monkeypatch, *, results, gemini, local):
+def _build_pipeline_stub(monkeypatch, *, results, gemini, local, use_gemini_primary=False):
     """Common setup: returns a RAGPipeline with all heavy deps mocked.
 
-    `gemini` / `local` là async-generator factories (nhận messages, stop_event, ... và yield text)."""
+    `gemini` / `local` là async-generator factories (nhận messages, stop_event, ... và yield text).
+    `use_gemini_primary` pin `config.USE_GEMINI_GENERATION` để test độc lập với .env:
+    False → nhánh fallback cũ (Gemini chỉ khi 0 kết quả); True → Gemini primary."""
+    monkeypatch.setattr(config, "USE_GEMINI_GENERATION", use_gemini_primary)
     pipeline = pl_module.RAGPipeline.__new__(pl_module.RAGPipeline)
     pipeline.encoder = MagicMock()
     pipeline.llm = MagicMock()
@@ -183,3 +186,99 @@ async def test_no_api_key_skips_gemini(monkeypatch):
 
     assert "fallback" not in types
     assert any(e.get("text") == "local-only" for e in events if e["type"] == "token")
+
+
+# ── Gemini primary (USE_GEMINI_GENERATION=True): trả lời khi 0 kết quả ──────
+# Pin use_gemini_primary=True để test nhánh mới (pipeline.py §4.1).
+
+async def test_gemini_primary_empty_results_emits_disclaimer_then_answer(monkeypatch):
+    """0 kết quả + Gemini primary → disclaimer kiến thức chung rồi tới token Gemini."""
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "fake")
+    monkeypatch.setattr(config, "GEMINI_FALLBACK_PREFIX_DISCLAIMER", True)
+
+    pipeline = _build_pipeline_stub(
+        monkeypatch,
+        results=[],
+        gemini=_async_gen(["gen-answer"]),
+        local=_async_gen_raises(AssertionError("local should not run")),
+        use_gemini_primary=True,
+    )
+
+    events = await _drain(pipeline.answer_stream("q", history=[]))
+    token_texts = [e["text"] for e in events if e["type"] == "token"]
+
+    # Disclaimer phát TRƯỚC token Gemini đầu tiên, đúng 1 lần, không có "fallback" event.
+    assert token_texts[0] == pl_module._NO_DATA_DISCLAIMER
+    assert token_texts[1] == "gen-answer"
+    assert token_texts.count(pl_module._NO_DATA_DISCLAIMER) == 1
+    assert "fallback" not in [e["type"] for e in events]
+    assert events[-1]["type"] == "done"
+
+
+async def test_gemini_primary_empty_results_disclaimer_off(monkeypatch):
+    """Flag tắt → không phát disclaimer, chỉ token Gemini."""
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "fake")
+    monkeypatch.setattr(config, "GEMINI_FALLBACK_PREFIX_DISCLAIMER", False)
+
+    pipeline = _build_pipeline_stub(
+        monkeypatch,
+        results=[],
+        gemini=_async_gen(["gen-answer"]),
+        local=_async_gen_raises(AssertionError("local should not run")),
+        use_gemini_primary=True,
+    )
+
+    events = await _drain(pipeline.answer_stream("q", history=[]))
+    token_texts = [e["text"] for e in events if e["type"] == "token"]
+
+    assert pl_module._NO_DATA_DISCLAIMER not in token_texts
+    assert token_texts == ["gen-answer"]
+
+
+async def test_gemini_primary_with_results_no_disclaimer(monkeypatch):
+    """Có kết quả nội bộ → dùng prompt grounded, KHÔNG phát disclaimer kiến thức chung."""
+    from app.rag.schemas import SearchResultSchema
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "fake")
+    monkeypatch.setattr(config, "GEMINI_FALLBACK_PREFIX_DISCLAIMER", True)
+
+    result = SearchResultSchema(
+        point_id="1", collection="places_danang", score=0.9,
+        entity_name="Bà Nà Hills", address="Đà Nẵng",
+    )
+    pipeline = _build_pipeline_stub(
+        monkeypatch,
+        results=[result],
+        gemini=_async_gen(["grounded-answer"]),
+        local=_async_gen_raises(AssertionError("local should not run")),
+        use_gemini_primary=True,
+    )
+
+    events = await _drain(pipeline.answer_stream("q", history=[]))
+    token_texts = [e["text"] for e in events if e["type"] == "token"]
+
+    assert pl_module._NO_DATA_DISCLAIMER not in token_texts
+    assert token_texts == ["grounded-answer"]
+
+
+async def test_gemini_primary_empty_fail_before_token_no_double_disclaimer(monkeypatch):
+    """Regression: Gemini fail TRƯỚC token đầu → KHÔNG dính disclaimer kiến thức chung
+    (đã defer), chỉ có disclaimer 'không khả dụng' rồi local LLM trả lời."""
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "fake")
+    monkeypatch.setattr(config, "GEMINI_FALLBACK_PREFIX_DISCLAIMER", True)
+
+    pipeline = _build_pipeline_stub(
+        monkeypatch,
+        results=[],
+        gemini=_async_gen_raises(GeminiFallbackError("401", status_code=401)),
+        local=_async_gen(["local-answer"]),
+        use_gemini_primary=True,
+    )
+
+    events = await _drain(pipeline.answer_stream("q", history=[]))
+    token_texts = [e["text"] for e in events if e["type"] == "token"]
+
+    # _NO_DATA_DISCLAIMER (deferred) không bao giờ phát vì Gemini chưa ra token nào.
+    assert pl_module._NO_DATA_DISCLAIMER not in token_texts
+    assert any("không khả dụng" in t for t in token_texts)
+    assert any(t == "local-answer" for t in token_texts)
+    assert events[-1]["type"] == "done"
