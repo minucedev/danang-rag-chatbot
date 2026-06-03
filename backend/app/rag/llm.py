@@ -38,13 +38,24 @@ class QwenHF:
         max_tokens: int,
         temperature: float = 0.2,
         stream: bool = False,
+        repetition_penalty: float = 1.0,
+        no_repeat_ngram_size: int = 0,
         **_ignored,
     ):
         if stream:
-            return self._stream(messages, max_tokens, temperature)
-        return self._generate_sync(messages, max_tokens)
+            # Stream default: use repetition_penalty=1.0 and no_repeat_ngram_size=5 to prevent loops while preserving Vietnamese natural flow
+            rep = repetition_penalty if repetition_penalty != 1.0 else 1.0
+            ngram = no_repeat_ngram_size if no_repeat_ngram_size != 0 else 5
+            return self._stream(messages, max_tokens, temperature, rep, ngram)
+        return self._generate_sync(messages, max_tokens, repetition_penalty, no_repeat_ngram_size)
 
-    def _generate_sync(self, messages: list[dict], max_tokens: int) -> dict:
+    def _generate_sync(
+        self,
+        messages: list[dict],
+        max_tokens: int,
+        repetition_penalty: float = 1.0,
+        no_repeat_ngram_size: int = 0,
+    ) -> dict:
         """Blocking generation — dùng cho analyzer (JSON output, do_sample=False)."""
         text = self.processor.apply_chat_template(
             messages,
@@ -53,19 +64,32 @@ class QwenHF:
             enable_thinking=False,
         )
         inputs = self.processor(text=text, return_tensors="pt").to(self.device)
+        gen_kwargs: dict = {
+            **inputs,
+            "max_new_tokens": max_tokens,
+            "do_sample": False,
+            "pad_token_id": self._get_tokenizer().eos_token_id,
+        }
+        if repetition_penalty is not None and repetition_penalty != 1.0:
+            gen_kwargs["repetition_penalty"] = repetition_penalty
+        if no_repeat_ngram_size is not None and no_repeat_ngram_size > 0:
+            gen_kwargs["no_repeat_ngram_size"] = no_repeat_ngram_size
+
         with torch.no_grad():
-            output_ids = self.model.generate(
-                **inputs,
-                max_new_tokens=max_tokens,
-                do_sample=False,
-                pad_token_id=self._get_tokenizer().eos_token_id,
-            )
+            output_ids = self.model.generate(**gen_kwargs)
         generated = output_ids[0][inputs["input_ids"].shape[-1]:]
         content = self._decode(generated)
         content = re.sub(r"<think>[\s\S]*?</think>", "", content).strip()
         return {"choices": [{"message": {"content": content}}]}
 
-    def _stream(self, messages: list[dict], max_tokens: int, temperature: float) -> Iterator:
+    def _stream(
+        self,
+        messages: list[dict],
+        max_tokens: int,
+        temperature: float,
+        repetition_penalty: float = 1.15,
+        no_repeat_ngram_size: int = 3,
+    ) -> Iterator:
         """Streaming generation qua TextIteratorStreamer + daemon thread.
 
         Yield dict cùng format llama.cpp: {"choices": [{"delta": {"content": "..."}}]}
@@ -92,6 +116,11 @@ class QwenHF:
         }
         if do_sample:
             gen_kwargs["temperature"] = temperature
+        if repetition_penalty is not None and repetition_penalty != 1.0:
+            gen_kwargs["repetition_penalty"] = repetition_penalty
+        if no_repeat_ngram_size is not None and no_repeat_ngram_size > 0:
+            gen_kwargs["no_repeat_ngram_size"] = no_repeat_ngram_size
+
         thread = threading.Thread(
             target=self.model.generate, kwargs=gen_kwargs, daemon=True
         )
@@ -163,8 +192,23 @@ def _load_model_from_name(
     return QwenHF(model=model, processor=processor, device=device)
 
 
-def load_llm() -> QwenHF:
-    """Load generator LLM (text-only, model từ config.LLM_HF_MODEL_NAME, optional 4-bit)."""
+def load_llm():
+    """Load generator LLM (supports GGUF via llama.cpp or Transformers via HuggingFace)."""
+    if config.USE_GGUF:
+        print(f"Loading GGUF LLM from {config.LLM_GGUF_PATH}...")
+        from llama_cpp import Llama
+        kwargs = dict(
+            model_path=config.LLM_GGUF_PATH,
+            n_ctx=config.LLM_N_CTX,
+            n_gpu_layers=config.LLM_N_GPU_LAYERS,
+            n_batch=512,
+            verbose=False,
+        )
+        try:
+            return Llama(**kwargs, chat_format="qwen")
+        except ValueError:
+            return Llama(**kwargs, chat_format="chatml")
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
     return _load_model_from_name(

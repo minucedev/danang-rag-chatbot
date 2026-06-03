@@ -153,37 +153,44 @@ async def retrieve_from_collection(
                 except (TypeError, ValueError):
                     return None
 
-            r = SearchResultSchema(
-                point_id=str(point.id),
-                collection=collection_name,
-                score=score,
-                entity_name=payload.get("entity_name", ""),
-                place_name=payload.get("place_name", ""),
-                district=payload.get("district", ""),
-                rating=_float(payload.get("rating")),
-                min_price=_float(payload.get("min_price_vnd")),
-                max_price=_float(payload.get("max_price_vnd")),
-                address=payload.get("address", ""),
-                content=payload.get("content", ""),
-                parent_entity_name=payload.get("parent_entity_name"),
-                parent_entity_id=payload.get("parent_entity_id"),
-                room_name=payload.get("room_name"),
-                capacity=_int(payload.get("capacity")),
-                bed_type=payload.get("bed_type"),
-                area_m2=_float(payload.get("area_m2")),
-                room_view=payload.get("room_view"),
-                cuisine=payload.get("cuisine"),
-                restaurant_type=payload.get("restaurant_type"),
-                check_in_time=payload.get("check_in_time"),
-                check_out_time=payload.get("check_out_time"),
-                time_open=payload.get("time_open"),
-                time_close=payload.get("time_close"),
-                tags=_norm_tags(payload.get("tags")),
-                review_count=_int(payload.get("review_count")),
-                star_rating=_float(payload.get("star_rating")),
-                price_level=payload.get("price_level"),
-                price_currency=payload.get("price_currency"),
-            )
+            init_kwargs = {
+                "point_id": str(point.id),
+                "collection": collection_name,
+                "score": score,
+                "entity_name": payload.get("entity_name", ""),
+                "place_name": payload.get("place_name", ""),
+                "district": payload.get("district", ""),
+                "rating": _float(payload.get("rating")),
+                "min_price": _float(payload.get("min_price_vnd")),
+                "max_price": _float(payload.get("max_price_vnd")),
+                "address": payload.get("address", ""),
+                "content": payload.get("content", ""),
+                "parent_entity_name": payload.get("parent_entity_name"),
+                "parent_entity_id": payload.get("parent_entity_id"),
+                "room_name": payload.get("room_name"),
+                "capacity": _int(payload.get("capacity")),
+                "bed_type": payload.get("bed_type"),
+                "area_m2": _float(payload.get("area_m2")),
+                "room_view": payload.get("room_view"),
+                "cuisine": payload.get("cuisine"),
+                "restaurant_type": payload.get("restaurant_type"),
+                "check_in_time": payload.get("check_in_time"),
+                "check_out_time": payload.get("check_out_time"),
+                "cancellation_policy": payload.get("cancellation_policy"),
+                "children_policy": payload.get("children_policy"),
+                "time_open": payload.get("time_open"),
+                "time_close": payload.get("time_close"),
+                "tags": _norm_tags(payload.get("tags")),
+                "review_count": _int(payload.get("review_count")),
+                "star_rating": _float(payload.get("star_rating")),
+                "price_level": payload.get("price_level"),
+                "price_currency": payload.get("price_currency"),
+            }
+            for k, v in payload.items():
+                if k not in ["min_price_vnd", "max_price_vnd", "entity_name", "place_name", "address", "content", "tags"]:
+                    if k not in init_kwargs:
+                        init_kwargs[k] = v
+            r = SearchResultSchema(**init_kwargs)
 
             # Enrich reviews with parent entity data
             review_collections = {
@@ -304,21 +311,30 @@ async def exact_name_search(
             except (TypeError, ValueError):
                 return None
 
-        results.append(SearchResultSchema(
-            point_id=str(point.id),
-            collection=col,
-            score=0.5,
-            entity_name=payload.get("entity_name", ""),
-            place_name=payload.get("place_name", ""),
-            district=payload.get("district", ""),
-            rating=_float(payload.get("rating")),
-            min_price=_float(payload.get("min_price_vnd")),
-            max_price=_float(payload.get("max_price_vnd")),
-            address=payload.get("address", ""),
-            content=payload.get("content", ""),
-            review_count=_int(payload.get("review_count")),
-            star_rating=_float(payload.get("star_rating")),
-        ))
+        init_kwargs = {
+            "point_id": str(point.id),
+            "collection": col,
+            "score": 0.5,
+            "entity_name": payload.get("entity_name", ""),
+            "place_name": payload.get("place_name", ""),
+            "district": payload.get("district", ""),
+            "rating": _float(payload.get("rating")),
+            "min_price": _float(payload.get("min_price_vnd")),
+            "max_price": _float(payload.get("max_price_vnd")),
+            "address": payload.get("address", ""),
+            "content": payload.get("content", ""),
+            "review_count": _int(payload.get("review_count")),
+            "star_rating": _float(payload.get("star_rating")),
+            "cancellation_policy": payload.get("cancellation_policy"),
+            "children_policy": payload.get("children_policy"),
+            "check_in_time": payload.get("check_in_time"),
+            "check_out_time": payload.get("check_out_time"),
+        }
+        for k, v in payload.items():
+            if k not in ["min_price_vnd", "max_price_vnd", "entity_name", "place_name", "address", "content", "tags"]:
+                if k not in init_kwargs:
+                    init_kwargs[k] = v
+        results.append(SearchResultSchema(**init_kwargs))
 
     return results
 
@@ -372,6 +388,9 @@ async def retrieve_by_intent(
             if key not in seen:
                 seen.add(key)
                 all_results.append(r)
+
+    # Sort all results by vector score descending so that top-scoring points from any collection are preserved
+    all_results.sort(key=lambda r: r.score, reverse=True)
 
     # Fallback price filter: Qdrant Range silently skips records lacking the field.
     # Asymmetry is intentional: an unknown price passes max_price (don't hide a

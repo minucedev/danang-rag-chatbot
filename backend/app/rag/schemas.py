@@ -20,6 +20,8 @@ class ChatRequest(BaseModel):
 
 
 class SearchResultSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     point_id: str
     collection: str
     score: float
@@ -44,6 +46,8 @@ class SearchResultSchema(BaseModel):
     restaurant_type: Optional[str] = None
     check_in_time: Optional[str] = None
     check_out_time: Optional[str] = None
+    cancellation_policy: Optional[str] = None
+    children_policy: Optional[str] = None
     time_open: Optional[str] = None
     time_close: Optional[str] = None
     tags: Optional[List[str]] = None
