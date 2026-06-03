@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { streamSSE } from "@/lib/sse";
 import { normalizeNFC } from "@/lib/nfc";
+import { getStoredProfileSessionId } from "@/lib/clientId";
 import type { Filters } from "./useFilters";
 import { upsertMessage } from "./useSessions";
 
@@ -73,7 +74,12 @@ export function useChat(sessionId: string | null) {
       try {
         const stream = streamSSE(
           "/api/chat/stream",
-          { session_id: sessionIdUsed, message, filters },
+          {
+            session_id: sessionIdUsed,
+            message,
+            filters,
+            profile_session_id: getStoredProfileSessionId(),
+          },
           abortRef.current.signal,
         );
 

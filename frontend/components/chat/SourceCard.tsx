@@ -1,20 +1,5 @@
 import { formatVND } from "@/lib/format";
-
-interface Source {
-  entity_name?: string;
-  parent_entity_name?: string;
-  place_name?: string;
-  district?: string;
-  rating?: number;
-  parent_rating?: number;
-  review_count?: number;
-  min_price?: number;
-  max_price?: number;
-  address?: string;
-  parent_address?: string;
-  content?: string;
-  collection?: string;
-}
+import type { Source } from "@/lib/sourceAdapter";
 
 function getDisplayName(s: Source): string {
   return s.parent_entity_name || s.entity_name || s.place_name || "Không rõ tên";
@@ -53,7 +38,17 @@ function getCategoryLabel(collection?: string): string {
   return "Địa điểm";
 }
 
-export function SourceCard({ source }: { source: Source }) {
+export function SourceCard({
+  source,
+  priceDisplay,
+  action,
+}: {
+  source: Source;
+  /** Chuỗi giá đã format sẵn (recommend) — ghi đè logic min/max_price. */
+  priceDisplay?: string;
+  /** Slot tuỳ chọn (vd nút tim) hiển thị ở góc thẻ. */
+  action?: React.ReactNode;
+}) {
   const name = getDisplayName(source);
   const rating = getRating(source);
   const addr = getAddress(source);
@@ -83,6 +78,7 @@ export function SourceCard({ source }: { source: Source }) {
             </span>
           </div>
         )}
+        {action && <div className="absolute top-2 right-2">{action}</div>}
       </div>
 
       {/* Card body */}
@@ -118,7 +114,9 @@ export function SourceCard({ source }: { source: Source }) {
 
         {/* Price + Maps */}
         <div className="flex items-center justify-between pt-1 border-t border-outline-variant/30">
-          {source.min_price !== undefined ? (
+          {priceDisplay ? (
+            <span className="text-sm font-bold text-primary line-clamp-1">{priceDisplay}</span>
+          ) : source.min_price !== undefined ? (
             <span className="text-sm font-bold text-primary">
               {source.max_price && source.max_price > source.min_price
                 ? `${formatVND(source.min_price)} – ${formatVND(source.max_price)}`

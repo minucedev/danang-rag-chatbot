@@ -76,6 +76,48 @@ _NO_DATA_DISCLAIMER = (
 )
 
 
+# ─── Cá nhân hoá theo hồ sơ ────────────────────────────────────────────────
+_COMPANION_VI = {"solo": "một mình", "couple": "cặp đôi", "family": "gia đình",
+                 "friends": "bạn bè", "business": "công tác"}
+_BUDGET_VI = {"low": "tiết kiệm", "mid": "trung bình", "high": "cao cấp"}
+_INTEREST_VI = {"beach": "biển", "food": "ẩm thực", "cafe": "cà phê", "culture": "văn hoá",
+                "nightlife": "về đêm", "family": "gia đình", "adventure": "phiêu lưu",
+                "shopping": "mua sắm"}
+
+
+def _build_profile_note(p) -> str:
+    """Tóm tắt UserProfile thành đoạn chèn vào system prompt để cá nhân hoá câu trả lời.
+    Trả "" nếu hồ sơ rỗng."""
+    lines = []
+    if p.display_name:
+        lines.append(f"- Tên: {p.display_name}")
+    if p.companions:
+        lines.append(f"- Đi cùng: {_COMPANION_VI.get(p.companions, p.companions)}")
+    if p.budget_level:
+        lines.append(f"- Ngân sách: {_BUDGET_VI.get(p.budget_level, p.budget_level)}")
+    if p.interests:
+        lines.append("- Sở thích: " + ", ".join(_INTEREST_VI.get(i, i) for i in p.interests))
+    if p.dietary:
+        lines.append(f"- Ăn kiêng/lưu ý: {p.dietary}")
+    if p.trip_dates:
+        lines.append(f"- Thời gian đi: {p.trip_dates.start} → {p.trip_dates.end}")
+    if not lines:
+        return ""
+    return (
+        "\n\nHỒ SƠ NGƯỜI DÙNG (dùng để cá nhân hoá: ưu tiên gợi ý hợp sở thích/ngân sách "
+        "và TÔN TRỌNG yêu cầu ăn kiêng. Nếu người dùng hỏi bạn có biết/đọc được hồ sơ của họ "
+        "không, hãy xác nhận là CÓ và tóm tắt ngắn gọn):\n" + "\n".join(lines)
+    )
+
+
+def _inject_profile(msgs: list[dict], note: str) -> list[dict]:
+    """Nối profile note vào nội dung system message (msgs[0]). No-op nếu note rỗng
+    hoặc msgs[0] không phải system. Tách module-level để test được."""
+    if note and msgs and msgs[0].get("role") == "system":
+        msgs[0] = {**msgs[0], "content": msgs[0]["content"] + note}
+    return msgs
+
+
 def _build_gemini_messages(
     query: str,
     history: list[dict],
@@ -240,6 +282,7 @@ class RAGPipeline:
         max_new_tokens: int = config.DEFAULT_MAX_TOKENS,
         temperature: float = config.DEFAULT_TEMPERATURE,
         session_id: Optional[str] = None,
+        profile_session_id: Optional[str] = None,
     ) -> AsyncIterator[dict]:
         """Yield SSE-ready event dicts: intent → sources → token* → done."""
         if stop_event is None:
@@ -276,12 +319,27 @@ class RAGPipeline:
                 session_ctx = {**session_ctx, **prefs}
                 await upsert_session_context(session_id, session_ctx)
 
+        # Cá nhân hoá: nạp hồ sơ (nếu có) → chèn vào system prompt của mọi nhánh sinh.
+        profile_note = ""
+        if profile_session_id:
+            try:
+                from app.db.profiles import get_profile
+                prof = await get_profile(profile_session_id)
+                if prof:
+                    profile_note = _build_profile_note(prof)
+            except Exception as exc:
+                print(f"[pipeline] load profile failed: {type(exc).__name__}: {exc}")
+
+        def _with_profile(msgs: list[dict]) -> list[dict]:
+            return _inject_profile(msgs, profile_note)
+
         # Chitchat: không cần RAG, trả lời trực tiếp từ LLM
         if intent == QueryIntent.CHITCHAT:
             yield {"type": "sources", "items": [], "total": 0}
             chitchat_messages = [{"role": "system", "content": _CHITCHAT_SYSTEM_PROMPT}]
             chitchat_messages.extend(build_history_messages(history, config.MAX_HISTORY_TURNS))
             chitchat_messages.append({"role": "user", "content": q})
+            chitchat_messages = _with_profile(chitchat_messages)
             async for token in generate_streaming(
                 chitchat_messages, self.llm, stop_event,
                 max_new_tokens=max_new_tokens, temperature=temperature,
@@ -300,7 +358,7 @@ class RAGPipeline:
                 events = []
             sources = events[:10]
             yield {"type": "sources", "items": sources, "total": len(sources)}
-            messages = _build_event_messages(q, events, history)
+            messages = _with_profile(_build_event_messages(q, events, history))
             t_before_gen = time.perf_counter()
             first_token_logged = False
             token_count = 0
@@ -371,7 +429,7 @@ class RAGPipeline:
         # 3.5. Fallback sang Gemini khi retrieve trả 0 kết quả (chỉ khi không dùng Gemini primary).
         # Khi USE_GEMINI_GENERATION=True, path này bị skip — Gemini primary xử lý luôn cả no-results.
         if not results and config.GEMINI_API_KEY and not config.USE_GEMINI_GENERATION:
-            gemini_messages = _build_gemini_messages(q, history, intent)
+            gemini_messages = _with_profile(_build_gemini_messages(q, history, intent))
             committed_to_gemini = False
             gemini_tokens = 0
             t_gemini_start = time.perf_counter()
@@ -426,7 +484,7 @@ class RAGPipeline:
                 # Chưa committed → client chưa thấy gì về Gemini, fall through im lặng.
 
         # 4. Build prompt (hiển thị q gốc cho UX) — rẽ nhánh theo intent
-        messages = _build_messages(q, results, history, intent)
+        messages = _with_profile(_build_messages(q, results, history, intent))
         prompt_chars = sum(len(m["content"]) for m in messages)
         print(f"[TIMING] prompt_built: {prompt_chars} chars across {len(messages)} msgs")
 
@@ -434,53 +492,48 @@ class RAGPipeline:
         first_token_logged = False
         token_count = 0
 
-        # 4.1. Gemini primary generator (nhanh hơn local LLM ~5-10x)
+        # 4.1. Gemini primary generator (nhanh hơn local LLM ~5-10x).
+        # BUFFER toàn bộ output rồi mới phát: nếu Gemini cắt giữa chừng / hết quota / lỗi
+        # (generate_gemini_streaming raise khi finishReason != STOP) thì CHƯA gửi gì cho
+        # client → sinh lại sạch bằng local LLM (đầy đủ) thay vì để câu trả lời cụt giữa từ.
+        # Đánh đổi: mất hiệu ứng stream từng chữ ở nhánh Gemini, đổi lấy câu trả lời trọn vẹn.
         if config.USE_GEMINI_GENERATION:
             # Không có dữ liệu nội bộ → để Gemini trả lời từ kiến thức chung (kèm disclaimer)
             # thay vì bám reference rỗng rồi báo "không tìm thấy". Missed query vẫn được log
             # ở trên để crawler bổ sung địa điểm thật sau.
-            gen_messages = messages if results else _build_gemini_messages(q, history, intent)
-            # Disclaimer chỉ phát khi Gemini thực sự ra token đầu tiên — tránh trùng/mâu
-            # thuẫn với disclaimer ở nhánh Gemini fail-trước-token bên dưới.
-            disclaimer_pending = (not results and config.GEMINI_FALLBACK_PREFIX_DISCLAIMER)
-            gemini_tokens_yielded = 0
+            gen_messages = messages if results else _with_profile(_build_gemini_messages(q, history, intent))
+            buffered: list[str] = []
             try:
                 async for token in generate_gemini_streaming(
                     gen_messages, stop_event,
                     max_new_tokens=max_new_tokens, temperature=temperature,
                 ):
-                    if not first_token_logged:
-                        t_first = time.perf_counter()
-                        print(f"[TIMING] prefill+first_token (Gemini): {(t_first - t_before_gen)*1000:.0f}ms")
-                        print(f"[TIMING] >>> TTFT: {(t_first - t_start)*1000:.0f}ms")
-                        first_token_logged = True
-                    if disclaimer_pending:
-                        yield {"type": "token", "text": _NO_DATA_DISCLAIMER}
-                        disclaimer_pending = False
-                    token_count += 1
-                    gemini_tokens_yielded += 1
-                    yield {"type": "token", "text": token}
+                    if stop_event.is_set():
+                        break
+                    buffered.append(token)
+                # User abort giữa lúc buffer → bỏ partial, để chat.py lưu "(Đã dừng)".
+                if stop_event.is_set():
+                    yield {"type": "done"}
+                    return
+                # Thành công + đầy đủ (finishReason=STOP). Phát disclaimer (nếu 0 kết quả) rồi text.
                 t_done = time.perf_counter()
-                print(f"[TIMING] generation (Gemini): {(t_done - t_before_gen)*1000:.0f}ms "
-                      f"({token_count} chunks)")
+                print(f"[TIMING] generation (Gemini, buffered): {(t_done - t_before_gen)*1000:.0f}ms "
+                      f"({len(buffered)} chunks)")
                 print(f"[TIMING] === TOTAL: {(t_done - t_start)*1000:.0f}ms ===")
+                if not results and config.GEMINI_FALLBACK_PREFIX_DISCLAIMER:
+                    yield {"type": "token", "text": _NO_DATA_DISCLAIMER}
+                for tok in buffered:
+                    yield {"type": "token", "text": tok}
                 yield {"type": "done"}
                 return
             except GeminiFallbackError as e:
                 status = f" status={e.status_code}" if e.status_code is not None else ""
-                if gemini_tokens_yielded > 0:
-                    # Đã gửi token cho client — không thể trộn local LLM vào
-                    print(f"[pipeline] Gemini primary failed mid-stream "
-                          f"after {gemini_tokens_yielded} tokens{status}: {e}")
-                    yield {"type": "error", "message": "Kết nối Gemini bị gián đoạn giữa chừng."}
-                    yield {"type": "done"}
-                    return
-                print(f"[pipeline] Gemini primary failed before first token{status}: {e} "
-                      f"— falling back to local LLM")
-                # Thêm disclaimer khi không có kết quả Qdrant và Gemini thất bại
+                # Chưa phát gì cho client (đang buffer) → rơi xuống local LLM sạch sẽ.
+                print(f"[pipeline] Gemini primary unusable{status} ({type(e).__name__}: {e}) "
+                      f"— regenerate with local LLM")
                 if not results:
                     yield {"type": "token",
-                           "text": "_(Không có dữ liệu nội bộ phù hợp và dịch vụ AI tổng quát không khả dụng.)_\n\n"}
+                           "text": "_(Dịch vụ AI tổng quát tạm không khả dụng — trả lời bằng mô hình nội bộ.)_\n\n"}
                 first_token_logged = False
                 token_count = 0
                 t_before_gen = time.perf_counter()

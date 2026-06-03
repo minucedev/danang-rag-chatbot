@@ -66,3 +66,29 @@ CREATE TABLE IF NOT EXISTS missed_queries (
     last_tried_at   INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_missed_queries_status ON missed_queries(status, created_at);
+
+-- Địa điểm yêu thích (ẩn danh theo client_id từ localStorage, KHÔNG FK tới sessions
+-- để sống sót khi xoá session). snapshot_json lưu nguyên source dict (shape SourceCard)
+-- nên render được kể cả khi điểm bị xoá khỏi Qdrant.
+CREATE TABLE IF NOT EXISTS favorites (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id     TEXT    NOT NULL,
+    point_id      TEXT    NOT NULL,
+    collection    TEXT    NOT NULL,
+    snapshot_json TEXT    NOT NULL,
+    created_at    INTEGER NOT NULL,
+    UNIQUE (client_id, collection, point_id)
+);
+CREATE INDEX IF NOT EXISTS idx_favorites_client ON favorites(client_id, created_at);
+
+-- Lịch trình AI sinh ra mà người dùng lưu lại (markdown). client_id như favorites.
+CREATE TABLE IF NOT EXISTS itineraries (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id   TEXT    NOT NULL,
+    title       TEXT    NOT NULL,
+    content_md  TEXT    NOT NULL,
+    session_id  TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_itineraries_client ON itineraries(client_id, updated_at);

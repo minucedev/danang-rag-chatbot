@@ -151,6 +151,7 @@ async def generate_gemini_streaming(
                             status_code=resp.status_code,
                         )
 
+                    finish_reason: str | None = None
                     async for raw_line in resp.aiter_lines():
                         if stop_event.is_set():
                             break
@@ -164,8 +165,10 @@ async def generate_gemini_streaming(
                         except json.JSONDecodeError as exc:
                             print(f"[gemini-fallback] SSE JSON parse error (skipping frame): {exc} — payload={payload[:80]!r}")
                             continue
-                        # candidates[0].content.parts[*].text
+                        # candidates[0].content.parts[*].text + finishReason
                         for cand in obj.get("candidates", []) or []:
+                            if cand.get("finishReason"):
+                                finish_reason = cand["finishReason"]
                             parts = (cand.get("content") or {}).get("parts") or []
                             for p in parts:
                                 text = p.get("text")
@@ -180,7 +183,19 @@ async def generate_gemini_streaming(
                         raise GeminiFallbackError(
                             "Gemini stream returned no text chunks (possibly safety-blocked or format changed)"
                         )
-                    return  # Stream thành công, thoát retry loop
+                    # Stream có text nhưng kết thúc BẤT THƯỜNG → câu trả lời bị CẮT thật sự:
+                    #   - RECITATION / SAFETY / OTHER: Gemini chặn giữa chừng.
+                    #   - finishReason=None: server đóng kết nối mà chưa gửi terminal reason
+                    #     (vd ngắt mạng, hoặc throttle khi sắp hết quota).
+                    # MAX_TOKENS KHÔNG tính là cắt — đó là trả lời đầy đủ tới giới hạn token,
+                    # vứt đi rồi sinh lại bằng local sẽ mất câu tốt + làm nhiễu log.
+                    # Lưu ý: truncation KHÔNG retry (đã yield text/đang ở cuối stream); raise đi
+                    # thẳng lên caller (nhánh buffer ở pipeline) để sinh lại bằng local LLM.
+                    if not stop_event.is_set() and finish_reason not in ("STOP", "MAX_TOKENS"):
+                        raise GeminiFallbackError(
+                            f"Gemini stream incomplete (finishReason={finish_reason!r})"
+                        )
+                    return  # Stream thành công (STOP hoặc MAX_TOKENS), thoát retry loop
 
             except GeminiFallbackError:
                 raise

@@ -1,8 +1,10 @@
 "use client";
 import { useState } from "react";
 import { SourceCard } from "./SourceCard";
+import { FavoriteButton } from "./FavoriteButton";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import type { Source } from "@/lib/sourceAdapter";
 
 interface Props {
   sources: Record<string, unknown>[];
@@ -20,7 +22,11 @@ export function SourceCardList({ sources }: Props) {
     <div className="mt-2 space-y-2">
       <div className="flex gap-2 overflow-x-auto pb-1">
         {shown.map((s, i) => (
-          <SourceCard key={i} source={s as Parameters<typeof SourceCard>[0]["source"]} />
+          <SourceCard
+            key={i}
+            source={s as Source}
+            action={<FavoriteButton source={s as Source} />}
+          />
         ))}
       </div>
       {sources.length > VISIBLE && (

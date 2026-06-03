@@ -17,6 +17,8 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     message: str = Field(..., min_length=1, max_length=2000)
     filters: Optional[ChatFilters] = None
+    # Session "hồ sơ" (ghim ở localStorage) để chat cá nhân hoá theo UserProfile.
+    profile_session_id: Optional[str] = None
 
 
 class SearchResultSchema(BaseModel):
@@ -203,3 +205,55 @@ class RecommendResponse(BaseModel):
     profile_used: UserProfile
     relaxed: bool = False
     notes: List[str] = Field(default_factory=list)
+
+
+# ─── Favorites (địa điểm đã lưu, ẩn danh theo client_id) ───────────────────
+
+class FavoriteCreate(BaseModel):
+    model_config = _CAMEL_CONFIG
+
+    client_id: str
+    point_id: str
+    collection: str
+    snapshot: dict  # passthrough source dict (shape SourceCard) — đổi schema không vỡ
+
+
+class FavoriteEntity(BaseModel):
+    model_config = _CAMEL_CONFIG
+
+    id: int
+    point_id: str
+    collection: str
+    snapshot: dict
+    created_at: int
+
+
+# ─── Itineraries (lịch trình đã lưu, markdown) ─────────────────────────────
+
+class ItineraryCreate(BaseModel):
+    model_config = _CAMEL_CONFIG
+
+    client_id: str
+    title: str = Field(..., min_length=1, max_length=200)
+    content_md: str = Field(..., min_length=1)
+    session_id: Optional[str] = None
+
+
+class ItineraryListItem(BaseModel):
+    model_config = _CAMEL_CONFIG
+
+    id: int
+    title: str
+    created_at: int
+    updated_at: int
+
+
+class ItineraryEntity(BaseModel):
+    model_config = _CAMEL_CONFIG
+
+    id: int
+    title: str
+    content_md: str
+    session_id: Optional[str] = None
+    created_at: int
+    updated_at: int

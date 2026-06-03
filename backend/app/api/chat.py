@@ -83,6 +83,7 @@ async def _event_stream(
                 max_new_tokens=config.DEFAULT_MAX_TOKENS,
                 temperature=config.DEFAULT_TEMPERATURE,
                 session_id=session_id,
+                profile_session_id=req.profile_session_id,
             ):
                 # Check client disconnect on every event
                 if await request.is_disconnected():

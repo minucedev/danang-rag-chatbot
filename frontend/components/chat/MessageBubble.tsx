@@ -1,6 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import { IntentBadge } from "./IntentBadge";
 import { SourceCardList } from "./SourceCardList";
+import { SaveItineraryButton } from "./SaveItineraryButton";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface UserBubbleProps {
@@ -68,6 +69,11 @@ export function AssistantBubble({ content, sources, intent, isStreaming }: Assis
           ) : null}
           {isStreaming && content && <span className="animate-pulse text-primary">▋</span>}
         </div>
+
+        {/* Lưu lịch trình AI sinh ra */}
+        {intent === "itinerary_search" && content && !isStreaming && (
+          <SaveItineraryButton content={content} />
+        )}
       </div>
     </div>
   );

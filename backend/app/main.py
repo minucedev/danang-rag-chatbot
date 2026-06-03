@@ -74,7 +74,7 @@ async def _scheduled_new_places_crawl() -> None:
     except Exception as exc:
         print(f"[scheduler] new_places_crawl FAILED: {type(exc).__name__}: {exc}")
 
-from app.api import chat, sessions, health, profile, recommend, admin, events
+from app.api import chat, sessions, health, profile, recommend, admin, events, favorites, itineraries
 
 
 @asynccontextmanager
@@ -184,6 +184,8 @@ app.include_router(profile.router)
 app.include_router(recommend.router)
 app.include_router(admin.router)
 app.include_router(events.router)
+app.include_router(favorites.router)
+app.include_router(itineraries.router)
 
 # Module-level placeholder so health.py can check before pipeline loads
 pl_module._pipeline_instance = None
