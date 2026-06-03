@@ -493,9 +493,11 @@ class RAGPipeline:
         token_count = 0
 
         # 4.1. Gemini primary generator (nhanh hơn local LLM ~5-10x).
-        # BUFFER toàn bộ output rồi mới phát: nếu Gemini cắt giữa chừng / hết quota / lỗi
-        # (generate_gemini_streaming raise khi finishReason != STOP) thì CHƯA gửi gì cho
-        # client → sinh lại sạch bằng local LLM (đầy đủ) thay vì để câu trả lời cụt giữa từ.
+        # BUFFER toàn bộ output rồi mới phát: nếu Gemini bị CẮT / hết quota / lỗi
+        # (generate_gemini_streaming raise khi finishReason ngoài {STOP, MAX_TOKENS}) thì CHƯA
+        # gửi gì cho client → sinh lại bằng local LLM thay vì để câu trả lời cụt giữa từ.
+        # Lưu ý: nhánh no-results, local dùng prompt grounded RỖNG (messages) nên có thể trả
+        # "không tìm thấy" thay vì kiến thức chung — chấp nhận khi Gemini không khả dụng.
         # Đánh đổi: mất hiệu ứng stream từng chữ ở nhánh Gemini, đổi lấy câu trả lời trọn vẹn.
         if config.USE_GEMINI_GENERATION:
             # Không có dữ liệu nội bộ → để Gemini trả lời từ kiến thức chung (kèm disclaimer)
