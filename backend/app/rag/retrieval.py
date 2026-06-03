@@ -68,7 +68,18 @@ def _norm_tags(v):
     return None
 
 
-def _build_filter(filters: Optional[dict]) -> Optional[Filter]:
+# star_rating chỉ có trên hotel payload; price_level trên entity + room.
+# Gate theo collection để tránh Qdrant Range/Match xoá sạch point ở collection thiếu field.
+_STAR_RATING_COLLECTIONS = {config.COLLECTION_ACCOMMODATION_HOTELS}
+_PRICE_LEVEL_COLLECTIONS = {
+    config.COLLECTION_PLACES,
+    config.COLLECTION_RESTAURANTS,
+    config.COLLECTION_ACCOMMODATION_HOTELS,
+    config.COLLECTION_ACCOMMODATION_ROOMS,
+}
+
+
+def _build_filter(filters: Optional[dict], collection_name: Optional[str] = None) -> Optional[Filter]:
     if not filters:
         return None
     conditions = []
@@ -81,6 +92,10 @@ def _build_filter(filters: Optional[dict]) -> Optional[Filter]:
         conditions.append(FieldCondition(key="min_price_vnd", range=Range(lte=float(filters["max_price"]))))
     if filters.get("min_price"):
         conditions.append(FieldCondition(key="min_price_vnd", range=Range(gte=float(filters["min_price"]))))
+    if filters.get("star_rating") is not None and collection_name in _STAR_RATING_COLLECTIONS:
+        conditions.append(FieldCondition(key="star_rating", range=Range(gte=float(filters["star_rating"]))))
+    if filters.get("price_level") and collection_name in _PRICE_LEVEL_COLLECTIONS:
+        conditions.append(FieldCondition(key="price_level", match=MatchValue(value=filters["price_level"])))
     return Filter(must=conditions) if conditions else None
 
 
@@ -93,7 +108,7 @@ async def retrieve_from_collection(
     score_threshold: float = 0.3,
 ) -> List[SearchResultSchema]:
     try:
-        q_filter = _build_filter(filters)
+        q_filter = _build_filter(filters, collection_name)
         result = await client.query_points(
             collection_name=collection_name,
             query=query_vector,

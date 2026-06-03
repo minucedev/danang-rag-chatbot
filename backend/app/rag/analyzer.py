@@ -1,9 +1,83 @@
 from __future__ import annotations
 import json
 import re
-from typing import Optional
+from typing import Any, Optional
 
+from app import config
 from app.rag.intent import QueryIntent
+
+VALID_DISTRICTS = {
+    "hai chau", "son tra", "thanh khe", "ngu hanh son", "cam le", "hoa vang", "lien chieu",
+}
+
+# Các trường filter dạng list (ported từ notebook) — dùng cho rerank heuristics.
+_LIST_FILTER_KEYS = [
+    "cuisine", "restaurant_type", "restaurant_category",
+    "suitable_for", "best_time_to_visit", "visit_duration", "tags",
+    "room_view", "bed_type", "amenities_room",
+    "cancellation_policy", "children_policy",
+]
+
+
+def _split_tokens(value: Any) -> list[str]:
+    """Chuẩn hóa giá trị (str hoặc list) thành list token chữ thường, đã dedup."""
+    if value is None:
+        return []
+    parts = value if isinstance(value, list) else re.split(r"[\/;,|]|\s-\s", str(value))
+    tokens: list[str] = []
+    for part in parts:
+        if part is None:
+            continue
+        for sub in str(part).split(","):
+            item = re.sub(r"\s+", " ", sub).strip().lower()
+            if item:
+                tokens.append(item)
+    seen: set[str] = set()
+    unique: list[str] = []
+    for tok in tokens:
+        if tok not in seen:
+            unique.append(tok)
+            seen.add(tok)
+    return unique
+
+
+def _normalize_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    v = str(value).strip().lower()
+    if v in {"true", "yes", "có", "co", "1"}:
+        return True
+    if v in {"false", "no", "không", "khong", "0"}:
+        return False
+    return None
+
+
+def _normalize_price_level(value: Any) -> Optional[str]:
+    if value:
+        v = str(value).strip().lower()
+        if v in {"low", "mid", "high"}:
+            return v
+        if "rẻ" in v or "binh dan" in v or "bình dân" in v or "sinh viên" in v:
+            return "low"
+        if "trung" in v or "vừa" in v:
+            return "mid"
+        if "cao" in v or "sang" in v or "đắt" in v:
+            return "high"
+    return None
+
+
+def _to_float(value: Any) -> Optional[float]:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_int(value: Any) -> Optional[int]:
+    try:
+        return int(float(value)) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 class LLMQueryAnalyzer:
@@ -60,139 +134,179 @@ class LLMQueryAnalyzer:
             print(f"  [DEBUG] Lỗi ép kiểu giá: {e}")
             return None
 
+    @staticmethod
+    def _empty_filters() -> dict:
+        """Filter rỗng đầy đủ key — dùng cho fallback và làm base cho _clean_filters."""
+        f: dict = {
+            "district": None, "min_rating": None, "max_price": None, "min_price": None,
+            "star_rating": None, "price_level": None, "has_discount": None,
+        }
+        for k in _LIST_FILTER_KEYS:
+            f[k] = []
+        return f
+
+    def _clean_filters(self, raw: dict) -> dict:
+        """Chuẩn hóa filter thô từ LLM về đúng kiểu; key thiếu lấy default rỗng."""
+        f = self._empty_filters()
+
+        district = raw.get("district")
+        if district:
+            district = str(district).lower().strip()
+            f["district"] = district if district in VALID_DISTRICTS else None
+
+        f["min_rating"] = _to_float(raw.get("min_rating"))
+        f["max_price"] = self._clean_price(raw.get("max_price"))
+        f["min_price"] = self._clean_price(raw.get("min_price"))
+        f["star_rating"] = _to_int(raw.get("star_rating"))
+        f["price_level"] = _normalize_price_level(raw.get("price_level"))
+        f["has_discount"] = _normalize_bool(raw.get("has_discount"))
+
+        for key in _LIST_FILTER_KEYS:
+            f[key] = _split_tokens(raw.get(key))
+
+        return f
+
     def analyze(self, query: str) -> dict:
         """Sử dụng LLM kèm Few-shot để phân tích ngữ nghĩa chính xác cấu trúc JSON"""
 
-        # System prompt định hình rõ ràng vai trò và cung cấp ví dụ chuẩn
+        # System prompt: gộp Router (phân loại + needs_rag) và Extractor (filter giàu).
         system_content = (
-            "Bạn là một AI chuyên trích xuất dữ liệu JSON cấu trúc từ câu hỏi du lịch Đà Nẵng.\n"
-            "Chỉ trả về DUY NHẤT một khối JSON. Không giải thích, không thêm text ngoài JSON.\n"
-            "Cấu trúc JSON bắt buộc phải tuân theo chính xác schema sau:\n"
+            "Bạn là AI phân loại câu hỏi và trích xuất dữ liệu JSON cho chatbot du lịch Đà Nẵng.\n"
+            "Chỉ trả về DUY NHẤT một khối JSON. Không giải thích, không markdown.\n\n"
+            "QUY TẮC PHÂN LOẠI ƯU TIÊN:\n"
+            "1. BẤT KỲ câu hỏi nào nhắc đến TÊN RIÊNG của thực thể (vd 'Chợ Cồn', 'Novotel Đà Nẵng', "
+            "'Hải sản Năm Đảnh', 'Bà Nà Hills', 'A La Carte') đều BẮT BUỘC là intent 'specific_search', "
+            "kể cả khi hỏi địa chỉ/giờ mở cửa/phòng/review hay so sánh nhiều thực thể.\n"
+            "2. Chỉ dùng 'hotel_search'/'restaurant_search'/'place_search'/'room_search' cho tìm kiếm "
+            "CHUNG CHUNG (không nêu tên cụ thể).\n"
+            "3. 'needs_rag'=false CHỈ khi là chitchat/ngoài phạm vi du lịch Đà Nẵng "
+            "(vd thời tiết, vé máy bay, 'bạn là ai').\n\n"
+            "Schema JSON bắt buộc:\n"
             "{\n"
-            '  "intent": "hotel_search" | "restaurant_search" | "place_search" | "review_search" | "event_search" | "itinerary_search" | "chitchat" | "general",\n'
-            '  "rewritten_query": "chuỗi từ khóa tìm kiếm rút gọn để tạo embedding",\n'
+            '  "needs_rag": true | false,\n'
+            '  "intent": "hotel_search" | "restaurant_search" | "place_search" | "room_search" | "review_search" | "event_search" | "itinerary_search" | "specific_search" | "chitchat" | "general",\n'
+            '  "entity": ["tên riêng cụ thể được nhắc đến, [] nếu không có"],\n'
+            '  "rewritten_query": "từ khóa ngắn để tạo embedding. KHÔNG chứa tên quận, giá, số sao, từ \'Đà Nẵng\', \'ở đâu\', \'mấy giờ\', \'review\'",\n'
             '  "filters": {\n'
-            '    "district": "son tra" | "hai chau" | "ngu hanh son" | "cam le" | "lien chieu" | "thanh khe" | null,\n'
-            '    "min_rating": float | null,\n'
-            '    "max_price": int_VND | null,\n'
-            '    "min_price": int_VND | null\n'
+            '    "district": "hai chau" | "son tra" | "thanh khe" | "ngu hanh son" | "cam le" | "hoa vang" | "lien chieu" | null,\n'
+            '    "min_rating": "float thang 1-10. \'trên 8 điểm\'->8.0; theo sao \'4.5 sao\'->9.0 (số sao * 2)" | null,\n'
+            '    "max_price": "int VND. \'1 triệu\'->1000000, \'500k\'->500000" | null,\n'
+            '    "min_price": int_VND | null,\n'
+            '    "star_rating": "int 1-5, số sao khách sạn" | null,\n'
+            '    "price_level": "low" | "mid" | "high" | null,\n'
+            '    "cuisine": ["vd hải sản, mì quảng, lẩu, cà phê"],\n'
+            '    "restaurant_type": ["vd buffet, quán ăn, nhà hàng, café"],\n'
+            '    "restaurant_category": [], "suitable_for": ["vd gia đình, cặp đôi, nhóm bạn"],\n'
+            '    "best_time_to_visit": ["vd sáng, tối, cuối tuần"], "visit_duration": ["vd 1-2 giờ, cả ngày"],\n'
+            '    "tags": ["vd sống ảo, check-in, view biển, tâm linh"],\n'
+            '    "room_view": ["vd sea view, city view"], "bed_type": ["vd double bed, king bed"],\n'
+            '    "amenities_room": ["vd wifi, bathtub, balcony"],\n'
+            '    "cancellation_policy": [], "children_policy": [], "has_discount": true | false | null\n'
             "  }\n"
-            "}"
+            "}\n"
+            "Chỉ điền filter khi câu hỏi nêu rõ; còn lại để null hoặc []."
         )
 
-        # Cung cấp ví dụ Few-shot để mô hình học cách xử lý teencode và hướng giá (đổ lại/trở lên)
+        # Few-shot: dạy teencode, hướng giá (đổ lại/trở lên), needs_rag, entity, filter giàu.
         user_prompt = f"""Hãy phân tích câu hỏi người dùng sau đây dựa trên các ví dụ mẫu:
 
 ### VÍ DỤ 1:
 Người dùng: "Có ks nào xịn xịn cỡ 2 củ ở q. Hải Châu ko shop?"
 Trả về JSON:
 {{
+  "needs_rag": true,
   "intent": "hotel_search",
-  "rewritten_query": "khách sạn xịn cao cấp Hải Châu",
-  "filters": {{
-    "district": "hai chau",
-    "min_rating": null,
-    "max_price": 2000000,
-    "min_price": null
-  }}
+  "entity": [],
+  "rewritten_query": "khách sạn",
+  "filters": {{"district": "hai chau", "max_price": 2000000, "price_level": "high"}}
 }}
 
 ### VÍ DỤ 2:
 Người dùng: "Cho mình xin vài địa chỉ ăn hải sản ngon mà giá khoảng 1 triệu đổ lại nhé"
 Trả về JSON:
 {{
+  "needs_rag": true,
   "intent": "restaurant_search",
-  "rewritten_query": "nhà hàng hải sản ngon",
-  "filters": {{
-    "district": null,
-    "min_rating": null,
-    "max_price": 1000000,
-    "min_price": null
-  }}
+  "entity": [],
+  "rewritten_query": "quán hải sản ngon",
+  "filters": {{"max_price": 1000000, "cuisine": ["hải sản"]}}
 }}
 
 ### VÍ DỤ 3:
 Người dùng: "quán ăn nào ở ngũ hành sơn được đánh giá trên 4.5 sao"
 Trả về JSON:
 {{
+  "needs_rag": true,
   "intent": "restaurant_search",
-  "rewritten_query": "quán ăn ngon ngũ hành sơn",
-  "filters": {{
-    "district": "ngu hanh son",
-    "min_rating": 4.5,
-    "max_price": null,
-    "min_price": null
-  }}
+  "entity": [],
+  "rewritten_query": "quán ăn ngon",
+  "filters": {{"district": "ngu hanh son", "min_rating": 9.0}}
 }}
 
 ### VÍ DỤ 4:
-Người dùng: "Tôi muốn biết thông tin về khách sạn Sala Danang Beach Hotel"
+Người dùng: "Tìm phòng khách sạn 4 sao view biển có giường đôi cho gia đình ở Sơn Trà"
 Trả về JSON:
 {{
-  "intent": "specific_search",
-  "rewritten_query": "Sala Danang Beach Hotel",
-  "filters": {{
-    "district": null,
-    "min_rating": null,
-    "max_price": null,
-    "min_price": null
-  }}
+  "needs_rag": true,
+  "intent": "hotel_search",
+  "entity": [],
+  "rewritten_query": "khách sạn",
+  "filters": {{"district": "son tra", "star_rating": 4, "room_view": ["sea view"], "bed_type": ["double bed"], "suitable_for": ["gia đình"]}}
 }}
 
 ### VÍ DỤ 5:
-Người dùng: "Tối nay ở Hải Châu có lễ hội gì không?"
+Người dùng: "So sánh khách sạn Novotel Đà Nẵng và A La Carte cái nào tốt hơn?"
 Trả về JSON:
 {{
-  "intent": "event_search",
-  "rewritten_query": "lễ hội sự kiện tối nay Hải Châu",
-  "filters": {{
-    "district": "hai chau",
-    "min_rating": null,
-    "max_price": null,
-    "min_price": null
-  }}
+  "needs_rag": true,
+  "intent": "specific_search",
+  "entity": ["Novotel Đà Nẵng", "A La Carte"],
+  "rewritten_query": "Novotel Đà Nẵng A La Carte",
+  "filters": {{}}
 }}
 
 ### VÍ DỤ 6:
-Người dùng: "Cuối tuần này Đà Nẵng có concert hay sự kiện gì vui không?"
+Người dùng: "Chợ Cồn mở cửa mấy giờ?"
 Trả về JSON:
 {{
-  "intent": "event_search",
-  "rewritten_query": "concert sự kiện cuối tuần Đà Nẵng",
-  "filters": {{
-    "district": null,
-    "min_rating": null,
-    "max_price": null,
-    "min_price": null
-  }}
+  "needs_rag": true,
+  "intent": "specific_search",
+  "entity": ["Chợ Cồn"],
+  "rewritten_query": "Chợ Cồn",
+  "filters": {{}}
 }}
 
 ### VÍ DỤ 7:
-Người dùng: "Gợi ý lịch trình 3 ngày 2 đêm Đà Nẵng cho cặp đôi"
+Người dùng: "Tối nay ở Hải Châu có lễ hội gì không?"
 Trả về JSON:
 {{
-  "intent": "itinerary_search",
-  "rewritten_query": "lịch trình 3 ngày cặp đôi Đà Nẵng khách sạn nhà hàng địa điểm",
-  "filters": {{
-    "district": null,
-    "min_rating": null,
-    "max_price": null,
-    "min_price": null
-  }}
+  "needs_rag": true,
+  "intent": "event_search",
+  "entity": [],
+  "rewritten_query": "lễ hội sự kiện",
+  "filters": {{"district": "hai chau", "best_time_to_visit": ["tối"]}}
 }}
 
 ### VÍ DỤ 8:
-Người dùng: "Bạn là ai và có thể giúp gì cho mình?"
+Người dùng: "Gợi ý lịch trình 3 ngày 2 đêm Đà Nẵng cho cặp đôi"
 Trả về JSON:
 {{
+  "needs_rag": true,
+  "intent": "itinerary_search",
+  "entity": [],
+  "rewritten_query": "lịch trình khách sạn nhà hàng địa điểm",
+  "filters": {{"suitable_for": ["cặp đôi"]}}
+}}
+
+### VÍ DỤ 9:
+Người dùng: "Bạn là ai và thời tiết Đà Nẵng tháng 7 thế nào?"
+Trả về JSON:
+{{
+  "needs_rag": false,
   "intent": "chitchat",
+  "entity": [],
   "rewritten_query": "",
-  "filters": {{
-    "district": null,
-    "min_rating": null,
-    "max_price": null,
-    "min_price": null
-  }}
+  "filters": {{}}
 }}
 
 ### BÀI TẬP THỰC TẾ:
@@ -205,9 +319,11 @@ Trả về JSON:"""
         ]
 
         _fallback = {
+            "needs_rag": True,
             "intent": QueryIntent.GENERAL,
+            "entity": [],
             "rewritten_query": query,
-            "filters": {"district": None, "min_rating": None, "max_price": None, "min_price": None},
+            "filters": self._empty_filters(),
             "source": "LLM_Fallback",
         }
 
@@ -215,7 +331,7 @@ Trả về JSON:"""
             try:
                 completion = self.llm.create_chat_completion(
                     messages=messages,
-                    max_tokens=256,
+                    max_tokens=config.ANALYZER_MAX_TOKENS,
                     temperature=0.0,
                     top_p=1.0,
                     stream=False,
@@ -236,16 +352,7 @@ Trả về JSON:"""
                 if not isinstance(raw_filters, dict):
                     raw_filters = {}
 
-                cleaned_filters = {
-                    "district": raw_filters.get("district"),
-                    "min_rating": raw_filters.get("min_rating"),
-                    "max_price": self._clean_price(raw_filters.get("max_price")),
-                    "min_price": self._clean_price(raw_filters.get("min_price"))
-                }
-
-                # Chuẩn hóa district text đầu ra
-                if cleaned_filters["district"]:
-                    cleaned_filters["district"] = str(cleaned_filters["district"]).lower().strip()
+                cleaned_filters = self._clean_filters(raw_filters)
 
                 try:
                     intent_str = parsed_json.get("intent", "general")
@@ -253,9 +360,35 @@ Trả về JSON:"""
                 except ValueError:
                     intent_enum = QueryIntent.GENERAL
 
+                # needs_rag=false → ép về CHITCHAT (đồng bộ với nhánh chitchat ở pipeline)
+                needs_rag = _normalize_bool(parsed_json.get("needs_rag"))
+                if needs_rag is None:
+                    needs_rag = intent_enum != QueryIntent.CHITCHAT
+                if not needs_rag:
+                    intent_enum = QueryIntent.CHITCHAT
+
+                # entity[] thay cho extract_specific_entities riêng của notebook
+                raw_entity = parsed_json.get("entity")
+                if isinstance(raw_entity, list):
+                    entity = [str(x).strip() for x in raw_entity if str(x).strip()]
+                elif raw_entity:
+                    entity = [str(raw_entity).strip()]
+                else:
+                    entity = []
+
+                # rewritten_query: nhận cả alias core_query/semantic_query của notebook
+                rewritten = (
+                    parsed_json.get("rewritten_query")
+                    or parsed_json.get("semantic_query")
+                    or parsed_json.get("core_query")
+                    or query
+                )
+
                 return {
+                    "needs_rag": needs_rag,
                     "intent": intent_enum,
-                    "rewritten_query": parsed_json.get("rewritten_query", query),
+                    "entity": entity,
+                    "rewritten_query": rewritten,
                     "filters": cleaned_filters,
                     "source": "LLM",
                 }

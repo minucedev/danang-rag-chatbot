@@ -103,3 +103,91 @@ async def test_empty_results_returns_empty():
     reranker = _mock_reranker([])
     out = await rerank_results([], "query", reranker)
     assert out == []
+
+
+# ── Heuristics (ported từ notebook) — chạy cả khi reranker=None ─────────────
+
+def _r(name, collection="places_danang", score=0.5, **kw):
+    return SearchResultSchema(
+        point_id="1", collection=collection, score=score, entity_name=name, **kw
+    )
+
+
+async def test_heuristic_district_boost_without_reranker():
+    """reranker=None: dùng điểm cosine làm base, +0.3 cho doc khớp quận."""
+    a = _r("A", district="son tra")
+    b = _r("B", district="hai chau")
+    extracted = {"filters": {"district": "son tra"}}
+    out = await rerank_results(
+        [b, a], "q", None, top_k=5, score_threshold=0.0, extracted=extracted
+    )
+    assert out[0].entity_name == "A"
+    assert abs(out[0].score - 0.8) < 1e-6  # 0.5 + 0.3
+
+
+async def test_heuristic_cuisine_mismatch_penalty():
+    seafood = _r("Hải sản Bé Mặn", collection="restaurants_danang", cuisine="hải sản")
+    pizza = _r("Pizza 4P", collection="restaurants_danang", cuisine="pizza")
+    extracted = {"filters": {"cuisine": ["hải sản"]}}
+    out = await rerank_results(
+        [pizza, seafood], "quán hải sản", None,
+        top_k=5, score_threshold=-10.0, extracted=extracted,
+    )
+    # pizza: -0.8 (mismatch rule) -0.15 (cuisine) ; seafood: +0.25
+    assert out[0].entity_name == "Hải sản Bé Mặn"
+    assert abs(out[0].score - 0.75) < 1e-6
+    assert abs(out[1].score - (-0.45)) < 1e-6
+
+
+async def test_heuristic_star_rating_penalty():
+    lo = _r("Hotel Lo", collection="accommodation_hotels_danang", star_rating=3)
+    hi = _r("Hotel Hi", collection="accommodation_hotels_danang", star_rating=5)
+    extracted = {"filters": {"star_rating": 4}}
+    out = await rerank_results(
+        [lo, hi], "khách sạn", None,
+        top_k=5, score_threshold=-10.0, extracted=extracted,
+    )
+    assert out[0].entity_name == "Hotel Hi"
+    assert abs(out[0].score - 0.7) < 1e-6   # 0.5 + 0.2
+    assert abs(out[1].score - 0.25) < 1e-6  # 0.5 - 0.25
+
+
+async def test_heuristic_rating_boost_tiers():
+    """review_count>5 → min(0.4, r/20); ngược lại → min(0.15, r/40)."""
+    many = _r("Many", rating=8.0, review_count=10)
+    few = _r("Few", rating=8.0, review_count=3)
+    out = await rerank_results(
+        [few, many], "q", None, top_k=5, score_threshold=-10.0
+    )
+    assert abs(many.score - 0.9) < 1e-6   # 0.5 + 0.4
+    assert abs(few.score - 0.65) < 1e-6   # 0.5 + 0.15
+    assert out[0].entity_name == "Many"
+
+
+async def test_heuristic_noop_when_no_filters_and_no_rating():
+    """Không filter + không rating → giữ nguyên base (đảm bảo backward-compat)."""
+    a = _r("A", score=0.4)
+    out = await rerank_results([a], "q", None, top_k=5, score_threshold=0.0)
+    assert abs(out[0].score - 0.4) < 1e-6
+
+
+async def test_heuristic_stacks_on_cross_encoder_score():
+    """Có reranker: heuristic CỘNG lên điểm cross-encoder, không ghi đè."""
+    seafood = _r("Hải sản X", collection="restaurants_danang", cuisine="hải sản")
+    reranker = _mock_reranker([0.5])
+    extracted = {"filters": {"cuisine": ["hải sản"]}}
+    out = await rerank_results(
+        [seafood], "quán hải sản", reranker,
+        top_k=5, score_threshold=-10.0, extracted=extracted,
+    )
+    assert abs(out[0].score - 0.75) < 1e-6  # 0.5 (predict) + 0.25 (cuisine)
+
+
+async def test_review_without_cuisine_not_penalized():
+    """Review nhà hàng thiếu cuisine → KHÔNG bị trừ điểm oan khi có filter cuisine."""
+    review = _r("Nhận xét hay", collection="restaurant_reviews_danang")  # cuisine=None
+    out = await rerank_results(
+        [review], "quán hải sản", None, top_k=5, score_threshold=-10.0,
+        extracted={"filters": {"cuisine": ["hải sản"]}},
+    )
+    assert abs(out[0].score - 0.5) < 1e-6  # giữ nguyên base, không -0.15

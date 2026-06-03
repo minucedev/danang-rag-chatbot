@@ -96,6 +96,11 @@ TOP_K_RETRIEVE: int = int(os.getenv("TOP_K_RETRIEVE", "15"))
 TOP_K_RERANK: int = int(os.getenv("TOP_K_RERANK", "5"))
 RERANK_SCORE_THRESHOLD: float = float(os.getenv("RERANK_SCORE_THRESHOLD", "0.3"))
 
+# Synthesizer / analyzer (ported từ notebook Kaggle)
+MAX_CONTEXT_CHARS: int = int(os.getenv("MAX_CONTEXT_CHARS", "4000"))
+MAX_ALTERNATIVES: int = int(os.getenv("MAX_ALTERNATIVES", "3"))
+ANALYZER_MAX_TOKENS: int = int(os.getenv("ANALYZER_MAX_TOKENS", "420"))
+
 # Place crawler — crawl địa điểm từ missed_queries và cập nhật định kỳ.
 PLACE_CRAWL_INTERVAL_HOURS: int = int(os.getenv("PLACE_CRAWL_INTERVAL_HOURS", "4"))
 NEW_PLACES_CRAWL_INTERVAL_HOURS: int = int(os.getenv("NEW_PLACES_CRAWL_INTERVAL_HOURS", "24"))

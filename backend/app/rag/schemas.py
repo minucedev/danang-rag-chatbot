@@ -11,6 +11,24 @@ class ChatFilters(BaseModel):
     min_rating: Optional[float] = None
     max_price: Optional[float] = None
     min_price: Optional[float] = None
+    # Bộ lọc giàu (ported từ notebook): scalar dùng cho Qdrant filter, list dùng cho rerank.
+    # star_rating/price_level vào thẳng MatchValue/Range của Qdrant → ràng buộc miền giá trị
+    # tại biên FE để giá trị sai không âm thầm trả về 0 kết quả.
+    star_rating: Optional[int] = Field(None, ge=1, le=5)
+    price_level: Optional[Literal["low", "mid", "high"]] = None
+    has_discount: Optional[bool] = None
+    cuisine: Optional[List[str]] = None
+    restaurant_type: Optional[List[str]] = None
+    restaurant_category: Optional[List[str]] = None
+    suitable_for: Optional[List[str]] = None
+    best_time_to_visit: Optional[List[str]] = None
+    visit_duration: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    room_view: Optional[List[str]] = None
+    bed_type: Optional[List[str]] = None
+    amenities_room: Optional[List[str]] = None
+    cancellation_policy: Optional[List[str]] = None
+    children_policy: Optional[List[str]] = None
 
 
 class ChatRequest(BaseModel):
