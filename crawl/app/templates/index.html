@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crawl Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-800">
+  <div class="max-w-6xl mx-auto p-4 space-y-4">
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold">🕷️ Crawl Admin <span class="text-sm font-normal text-slate-500">(Foody · standalone)</span></h1>
+      <div id="status-badge" class="text-sm px-3 py-1 rounded-full bg-slate-300">đang tải…</div>
+    </header>
+
+    <div class="grid md:grid-cols-2 gap-4">
+      <!-- Sources -->
+      <section class="bg-white rounded-xl shadow p-4">
+        <h2 class="font-semibold mb-2">Nguồn URL</h2>
+        <form id="source-form" class="flex flex-wrap gap-2 mb-3">
+          <input name="url" required placeholder="https://www.foody.vn/da-nang/..." class="flex-1 min-w-[200px] border rounded px-2 py-1 text-sm" />
+          <input name="category" placeholder="category" class="w-28 border rounded px-2 py-1 text-sm" />
+          <button class="bg-blue-600 text-white rounded px-3 py-1 text-sm">Thêm</button>
+        </form>
+        <div class="max-h-64 overflow-auto">
+          <table class="w-full text-sm">
+            <thead class="text-left text-slate-500"><tr><th>URL</th><th>Category</th><th></th></tr></thead>
+            <tbody id="sources-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Run controls -->
+      <section class="bg-white rounded-xl shadow p-4">
+        <h2 class="font-semibold mb-2">Chạy crawl</h2>
+        <div class="flex items-end gap-2 mb-3">
+          <label class="text-sm">Freshness (giờ)
+            <input id="freshness" type="number" value="{{ freshness_default }}" class="block w-24 border rounded px-2 py-1 text-sm" />
+          </label>
+          <button id="run-btn" class="bg-green-600 text-white rounded px-4 py-2 text-sm font-medium">▶ Chạy crawl</button>
+        </div>
+        <p class="text-xs text-slate-500">Chỉ crawl entity mới / quá hạn freshness / quá cũ. Mới crawl gần đây sẽ bị bỏ qua.</p>
+        <h3 class="font-medium mt-4 mb-1 text-sm">Log realtime</h3>
+        <pre id="log" class="bg-slate-900 text-green-300 text-xs rounded p-2 h-56 overflow-auto whitespace-pre-wrap"></pre>
+      </section>
+    </div>
+
+    <!-- Entities -->
+    <section class="bg-white rounded-xl shadow p-4">
+      <h2 class="font-semibold mb-2">Entity đã/đang crawl</h2>
+      <div class="overflow-auto">
+        <table class="w-full text-sm">
+          <thead class="text-left text-slate-500 border-b">
+            <tr><th class="py-1">Tên</th><th>Quận</th><th>Trạng thái</th><th>Review</th><th>Lần crawl gần nhất</th><th>Độ cũ</th></tr>
+          </thead>
+          <tbody id="entities-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+<script>
+const fmtAge = (ts) => {
+  if (!ts) return "—";
+  const sec = Math.floor(Date.now()/1000) - ts;
+  if (sec < 3600) return Math.floor(sec/60) + " phút";
+  if (sec < 86400) return Math.floor(sec/3600) + " giờ";
+  return Math.floor(sec/86400) + " ngày";
+};
+const fmtTime = (ts) => ts ? new Date(ts*1000).toLocaleString("vi-VN") : "chưa crawl";
+const statusColor = (s) => ({done:"text-green-600", crawling:"text-blue-600", error:"text-red-600", pending:"text-slate-400"}[s] || "");
+
+async function loadSources() {
+  const rows = await (await fetch("/api/sources")).json();
+  document.getElementById("sources-body").innerHTML = rows.map(s => `
+    <tr class="border-b">
+      <td class="py-1 truncate max-w-[260px]"><a href="${s.url}" target="_blank" class="text-blue-600 hover:underline">${s.url}</a></td>
+      <td>${s.category||""}</td>
+      <td><button data-id="${s.id}" class="del-src text-red-500 text-xs">xóa</button></td>
+    </tr>`).join("") || `<tr><td colspan="3" class="text-slate-400 py-2">Chưa có nguồn nào.</td></tr>`;
+  document.querySelectorAll(".del-src").forEach(b => b.onclick = async () => {
+    await fetch(`/api/sources/${b.dataset.id}/delete`, {method:"POST"});
+    loadSources();
+  });
+}
+
+async function loadEntities() {
+  const rows = await (await fetch("/api/entities")).json();
+  document.getElementById("entities-body").innerHTML = rows.map(e => `
+    <tr class="border-b">
+      <td class="py-1">${e.name || "<span class='text-slate-400'>(chưa có)</span>"}</td>
+      <td>${e.district||""}</td>
+      <td class="${statusColor(e.status)}">${e.status}</td>
+      <td>${e.review_count ?? ""}</td>
+      <td>${fmtTime(e.last_crawl_at)}</td>
+      <td>${fmtAge(e.last_crawl_at)}</td>
+    </tr>`).join("") || `<tr><td colspan="6" class="text-slate-400 py-2">Chưa có entity nào.</td></tr>`;
+}
+
+async function loadState() {
+  const {state} = await (await fetch("/api/state")).json();
+  const badge = document.getElementById("status-badge");
+  if (state.running) { badge.textContent = "⏳ đang crawl ("+state.phase+")"; badge.className = "text-sm px-3 py-1 rounded-full bg-amber-300"; }
+  else { badge.textContent = "✓ rảnh"; badge.className = "text-sm px-3 py-1 rounded-full bg-green-300"; }
+  return state.running;
+}
+
+document.getElementById("source-form").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  const res = await fetch("/api/sources", {method:"POST", body: fd});
+  if (!res.ok) { alert((await res.json()).error || "Lỗi thêm nguồn"); return; }
+  ev.target.reset(); loadSources();
+};
+
+document.getElementById("run-btn").onclick = async () => {
+  const fd = new FormData();
+  fd.append("freshness_hours", document.getElementById("freshness").value);
+  const res = await fetch("/api/crawl/run", {method:"POST", body: fd});
+  if (res.status === 409) { alert("Đang có một lượt crawl chạy."); return; }
+};
+
+// Live log qua SSE
+const logEl = document.getElementById("log");
+const es = new EventSource("/api/crawl/logs/stream");
+es.onmessage = (e) => {
+  logEl.textContent += e.data + "\n";
+  logEl.scrollTop = logEl.scrollHeight;
+};
+
+// Poll state + entities định kỳ (nhanh hơn khi đang chạy)
+async function tick() {
+  const running = await loadState();
+  await loadEntities();
+  setTimeout(tick, running ? 2000 : 6000);
+}
+loadSources();
+tick();
+</script>
+</body>
+</html>
