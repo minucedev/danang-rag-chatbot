@@ -105,6 +105,7 @@ async def _run_foody(ctx) -> dict:
             page = await cxt.new_page()
             try:
                 await db.set_entity_status(url, "crawling")
+                await ctx.log("info", f"Đang crawl: {url}")
                 data = await foody_crawler.crawl_detail(page, url)
                 name = data.get("Name", "")
                 district = _extract_district(data.get("Address", "")) or ent.get("district", "")

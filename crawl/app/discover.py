@@ -19,6 +19,16 @@ _HEADERS = {
 }
 
 
+_CITY_COOKIES = {
+    "da-nang": "219",
+    "danang": "219",
+    "ha-noi": "218",
+    "hanoi": "218",
+    "ho-chi-minh": "217",
+    "hcm": "217",
+}
+
+
 async def discover(
     city: str | None = None,
     max_new: int | None = None,
@@ -36,7 +46,13 @@ async def discover(
     seen: set[str] = set()
     headers = {**_HEADERS, "Referer": f"https://www.foody.vn/{city}"}
 
-    async with httpx.AsyncClient(timeout=25.0, headers=headers) as client:
+    # Foody yêu cầu cookie floc (location code) để lọc chính xác tỉnh thành
+    cookies = {"flg": "vn"}
+    loc_id = _CITY_COOKIES.get(city.lower())
+    if loc_id:
+        cookies["floc"] = loc_id
+
+    async with httpx.AsyncClient(timeout=25.0, headers=headers, cookies=cookies) as client:
         for page in range(1, config.DISCOVERY_MAX_PAGES + 1):
             if len(out) >= max_new:
                 break
