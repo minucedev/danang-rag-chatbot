@@ -15,7 +15,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-from app import config, db, discover, foody_crawler
+from app import config, db, discover, foody_crawler, ingest
 from app.logbus import log_bus
 
 _VN_DISTRICTS = {
@@ -194,8 +194,28 @@ def _hotel_runner(make_engine, data_dir: str):
     return _run
 
 
+# ─── Ingest job (CSV crawl → Qdrant, upsert) — chạy sync trong thread ─────────
+def _ingest_runner():
+    async def _run(ctx) -> dict:
+        loop = asyncio.get_running_loop()
+
+        def _log(line: str) -> None:  # gọi từ thread → đẩy lên log_bus an toàn
+            loop.call_soon_threadsafe(
+                log_bus.publish, f"[{time.strftime('%H:%M:%S')}] INFO: {line}")
+
+        await ctx.log("info", "Bắt đầu ingest CSV → Qdrant (upsert)…")
+        counts = await loop.run_in_executor(None, lambda: ingest.run_ingest_blocking(_log))
+        total = sum(counts.values()) if counts else 0
+        await ctx.log("info", f"Ingest xong: {counts}")
+        return {"total": total, "ok": total, "failed": 0}
+    return _run
+
+
 ENGINES: dict[str, dict] = {
-    "foody": {"label": "Foody — Nhà hàng", "run": _run_foody},
-    "agoda": {"label": "Agoda — Khách sạn", "run": _hotel_runner(_make_agoda, config.DATA_AGODA)},
-    "booking": {"label": "Booking — Khách sạn", "run": _hotel_runner(_make_booking, config.DATA_BOOKING)},
+    "foody": {"label": "Foody — Nhà hàng", "kind": "crawl", "run": _run_foody},
+    "agoda": {"label": "Agoda — Khách sạn", "kind": "crawl", "run": _hotel_runner(_make_agoda, config.DATA_AGODA)},
+    "booking": {"label": "Booking — Khách sạn", "kind": "crawl", "run": _hotel_runner(_make_booking, config.DATA_BOOKING)},
+    "ingest": {"label": "⬆ Đẩy lên Qdrant", "kind": "ingest", "run": _ingest_runner()},
 }
+
+CRAWL_KEYS = [k for k, v in ENGINES.items() if v.get("kind") == "crawl"]

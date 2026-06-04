@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
 from app import config, db, orchestrator
-from app.engines import ENGINES
+from app.engines import ENGINES, CRAWL_KEYS
 from app.logbus import log_bus
 
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -32,7 +32,7 @@ async def _scheduled_run() -> None:
     if orchestrator.is_running():
         return
     try:
-        await orchestrator.run_engines(list(ENGINES.keys()), trigger="scheduled", force=False)
+        await orchestrator.run_engines(CRAWL_KEYS, trigger="scheduled", force=False)
     except Exception as exc:
         print(f"[crawl-admin] scheduled run failed: {type(exc).__name__}: {exc}")
 
@@ -98,7 +98,7 @@ async def api_job_run(key: str):
 async def api_run_all():
     if orchestrator.is_running():
         return JSONResponse({"error": "Đang có một lượt crawl chạy."}, status_code=409)
-    asyncio.create_task(_bg(list(ENGINES.keys()), force=False))
+    asyncio.create_task(_bg(CRAWL_KEYS, force=False))
     return {"started": True}
 
 

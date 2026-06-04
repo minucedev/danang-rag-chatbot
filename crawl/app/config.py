@@ -7,6 +7,30 @@ BASE_DIR = Path(__file__).resolve().parent.parent  # = crawl/
 DATA_DIR = BASE_DIR / "data"
 DB_PATH = os.getenv("CRAWL_DB_PATH", str(DATA_DIR / "crawl.db"))
 
+# ── Qdrant ingest: dùng chung Qdrant + model embed với app chính ──────────────
+# Nạp creds Qdrant từ backend/.env (điểm tích hợp duy nhất với app chính).
+_BACKEND = BASE_DIR.parent / "backend"
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_BACKEND / ".env")
+except Exception:
+    pass
+# Load bge-m3 offline từ cache local của backend (tránh gọi mạng HuggingFace)
+os.environ.setdefault("HF_HUB_CACHE", str(_BACKEND / "models" / ".cache" / "huggingface"))
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
+QDRANT_URL = os.getenv("QDRANT_URL", "")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", "BAAI/bge-m3")
+INGEST_BATCH = int(os.getenv("CRAWL_INGEST_BATCH", "64"))
+INGEST_RECREATE = os.getenv("CRAWL_INGEST_RECREATE", "false").lower() in ("1", "true", "yes")
+
+COLLECTION_PLACES = "places_danang"
+COLLECTION_RESTAURANTS = "restaurants_danang"
+COLLECTION_ACCOMMODATION_HOTELS = "accommodation_hotels_danang"
+COLLECTION_ACCOMMODATION_ROOMS = "accommodation_rooms_danang"
+COLLECTION_ACCOMMODATION_REVIEWS = "accommodation_reviews_danang"
+
 # Logic độ "cũ" theo crawl-update.txt
 FRESHNESS_HOURS = int(os.getenv("CRAWL_FRESHNESS_HOURS", "24"))   # mới crawl < ngần này → bỏ qua
 STALE_HOURS = int(os.getenv("CRAWL_STALE_HOURS", "720"))          # quá cũ (mặc định 30 ngày) → ép crawl lại

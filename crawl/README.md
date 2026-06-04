@@ -9,8 +9,16 @@ Công cụ **độc lập** điều phối nhiều crawler + giao diện quản 
 | `foody` | Nhà hàng Foody | API discovery + Playwright detail (async) | `data/foody/restaurant_detail.csv` + bảng `entities` |
 | `agoda` | Khách sạn Agoda | Playwright sync (`crawl1 (2).py` nguyên trạng) | `data/agoda/{hotels,rooms,prices,policies,reviews,images}.csv` |
 | `booking` | Khách sạn Booking.com | Playwright sync (nguyên trạng) | `data/booking/...` |
+| `ingest` | **Đẩy CSV → Qdrant** | embed bge-m3 + **upsert** (không recreate) | upsert vào `restaurants_danang`, `accommodation_*` |
 
-→ Output CSV khớp schema mà ETL `qdrant-etl.ipynb` đọc.
+→ Output CSV khớp schema mà ETL `qdrant-etl.ipynb` đọc; job `ingest` đẩy chính các CSV đó lên Qdrant.
+
+## Ingest lên Qdrant (nút riêng)
+- Bấm thẻ **"⬆ Đẩy lên Qdrant"** sau khi crawl → embed (bge-m3) + **upsert** (theo `stable_uuid`,
+  KHÔNG xoá collection → giữ nguyên `places_danang` + dữ liệu cũ). Idempotent (chạy lại không nhân bản).
+- Phạm vi: nhà hàng (Foody) + khách sạn/phòng/review (Agoda/Booking). KHÔNG đụng places.
+- Cần `backend/.env` có `QDRANT_URL`/`QDRANT_API_KEY` (cùng Qdrant app chính) + bge-m3 trong
+  `backend/models/.cache` (load offline). KHÔNG vào scheduler/"Chạy tất cả" (chỉ bấm tay).
 
 ## Tính năng
 - **Chạy từng engine** (nút Chạy = ép chạy) hoặc **Chạy tất cả** (theo freshness).
