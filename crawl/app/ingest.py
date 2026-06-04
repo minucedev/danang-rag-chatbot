@@ -214,6 +214,45 @@ def build_restaurant_entities(df):
     return dedupe_docs(docs)
 
 
+def build_restaurant_reviews(df, url_to_entity):
+    """Review nhà hàng (Foody) → docs. Link parent qua url_to_entity (url → entity_id)."""
+    docs = []
+    if df.empty:
+        return docs
+    c_url = resolve_col(df, ["url", "URL"])
+    c_user = resolve_col(df, ["username", "reviewer_name", "author"])
+    c_score = resolve_col(df, ["score", "rating", "review_rating"])
+    c_content = resolve_col(df, ["clean_content", "content", "review_text"])
+    c_time_raw = resolve_col(df, ["time", "review_time"])
+    c_time_parsed = resolve_col(df, ["parsed_time", "review_date"])
+    c_recency = resolve_col(df, ["recency_score"])
+    if c_content is None:
+        return docs
+    for row in df.to_dict("records"):
+        text = clean_text(row.get(c_content, ""))
+        if len(text) < 8:
+            continue
+        source_url = clean_text(row.get(c_url, "")) if c_url else ""
+        parent_id = url_to_entity.get(source_url) if source_url else None
+        if not parent_id:
+            continue
+        user = clean_text(row.get(c_user, "")) if c_user else ""
+        time_raw = clean_text(row.get(c_time_raw, "")) if c_time_raw else ""
+        time_val = row.get(c_time_parsed, None) if c_time_parsed else row.get(c_time_raw, None)
+        iso_dt, unix_ts = parse_datetime(time_val, dayfirst=True)
+        doc_id = stable_uuid(["restaurant_review", source_url, user, time_raw, text[:120]])
+        payload = {
+            "domain": "restaurant", "source_type": "restaurant_review",
+            "source_platform": "foody_dataset", "parent_entity_id": parent_id,
+            "source_place_id": source_url, "author": user,
+            "rating": safe_float(row.get(c_score, None)) if c_score else None,
+            "timestamp_raw": time_raw, "timestamp_norm": iso_dt, "timestamp_unix": unix_ts,
+            "recency_score": safe_float(row.get(c_recency, None)) if c_recency else None,
+        }
+        docs.append({"id": doc_id, "text": text, "payload": payload})
+    return dedupe_docs(docs)
+
+
 def build_image_summary(df):
     if df.empty:
         return {}
@@ -543,6 +582,26 @@ def run_ingest_blocking(log: Callable[[str], None]) -> dict:
             counts[config.COLLECTION_RESTAURANTS] = upsert_docs(
                 client, config.COLLECTION_RESTAURANTS, embedder, docs, log, config.INGEST_BATCH)
             log(f"Nhà hàng: {counts[config.COLLECTION_RESTAURANTS]} doc")
+
+            # ── Restaurant reviews (Foody) — link parent qua url của entity vừa build ──
+            url_to_entity = {
+                d["payload"]["source_url"]: d["id"]
+                for d in docs if d["payload"].get("source_url")
+            }
+            df_rv = _read_csv(Path(config.DATA_FOODY) / "reviews_output.csv")
+            if df_rv.empty:
+                log("Không có reviews_output.csv — bỏ qua review nhà hàng.")
+            elif not url_to_entity:
+                # CSV có dữ liệu nhưng không nhà hàng nào có URL để liên kết → log đúng nguyên nhân
+                log(f"Có {len(df_rv)} dòng review nhưng không nhà hàng nào có URL để liên kết — bỏ qua.")
+            else:
+                rv_docs = build_restaurant_reviews(df_rv, url_to_entity)
+                ensure_collection(client, config.COLLECTION_RESTAURANT_REVIEWS, vec_size, recreate)
+                ensure_payload_indexes(client, config.COLLECTION_RESTAURANT_REVIEWS)
+                counts[config.COLLECTION_RESTAURANT_REVIEWS] = upsert_docs(
+                    client, config.COLLECTION_RESTAURANT_REVIEWS, embedder, rv_docs, log, config.INGEST_BATCH)
+                # log cả số dòng CSV để thấy ngay nếu phần lớn review bị loại (orphan/ngắn)
+                log(f"Review nhà hàng: {counts[config.COLLECTION_RESTAURANT_REVIEWS]} doc (từ {len(df_rv)} dòng CSV)")
         else:
             log("Không có restaurant_detail.csv — bỏ qua nhà hàng.")
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import pandas as pd
 
 from app import ingest
+from app import foody_review_crawler
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -129,6 +130,72 @@ def test_build_hotels_rooms_reviews_join():
     assert room_docs[0]["payload"]["parent_entity_id"] == parent
     assert rev_docs[0]["payload"]["parent_entity_id"] == parent
     assert h2e["h1"] == parent
+
+
+def test_review_limit_tiers():
+    assert foody_review_crawler.review_limit(50) == 50    # <100 → lấy hết
+    assert foody_review_crawler.review_limit(100) == 80   # 100–200 → 80
+    assert foody_review_crawler.review_limit(200) == 80
+    assert foody_review_crawler.review_limit(250) == 100  # >200 → 100
+
+
+def test_extract_score():
+    assert foody_review_crawler.extract_score("8,5/10") == "8.5"   # comma → dot
+    assert foody_review_crawler.extract_score("Điểm: 9") == "9"    # integer
+    assert foody_review_crawler.extract_score("7.0 trên 10") == "7.0"  # ưu tiên thập phân, lấy match đầu
+    assert foody_review_crawler.extract_score("") == ""
+    assert foody_review_crawler.extract_score("ngon lắm") == ""    # không số → rỗng
+
+
+def test_clean_content():
+    raw = "Quán ngon\nThích\nThảo luận\n- Đây là nhận xét của khách\nPhục vụ tốt"
+    assert foody_review_crawler.clean_content(raw) == "Quán ngon\nPhục vụ tốt"
+    assert foody_review_crawler.clean_content("   \n  ") == ""
+
+
+def test_parse_btn_selector():
+    sel = foody_review_crawler.parse_btn_selector("https://www.foody.vn/da-nang/quan-a/")
+    assert sel.startswith("#\\/da-nang\\/quan-a >")  # bỏ slash cuối + escape /
+
+
+def test_build_restaurant_reviews_join_and_drop():
+    parent = ingest.stable_uuid(["restaurant_entity", "https://foody.vn/da-nang/quan-a"])
+    url_to_entity = {"https://foody.vn/da-nang/quan-a": parent}
+    df = pd.DataFrame([
+        {"url": "https://foody.vn/da-nang/quan-a", "username": "An", "time": "01/02/2024",
+         "score": "8.5", "content": "Đồ ăn ngon, phục vụ tốt"},          # giữ
+        {"url": "https://foody.vn/da-nang/quan-la", "username": "B", "time": "",
+         "score": "5", "content": "Quán lạ không có parent"},            # orphan → loại
+        {"url": "https://foody.vn/da-nang/quan-a", "username": "C", "time": "",
+         "score": "", "content": "ngắn"},                                # <8 ký tự → loại
+    ])
+    docs = ingest.build_restaurant_reviews(df, url_to_entity)
+    assert len(docs) == 1
+    assert docs[0]["text"] == "Đồ ăn ngon, phục vụ tốt"  # đúng dòng còn lại
+    p = docs[0]["payload"]
+    assert p["parent_entity_id"] == parent
+    assert p["source_type"] == "restaurant_review"
+    assert p["rating"] == 8.5
+    assert p["source_place_id"] == "https://foody.vn/da-nang/quan-a"
+    # dayfirst=True → 01/02/2024 là 1 tháng 2 (không phải 2 tháng 1)
+    assert p["timestamp_norm"].startswith("2024-02-01")
+
+
+def test_build_restaurant_reviews_dedupe_and_distinct():
+    parent = ingest.stable_uuid(["restaurant_entity", "https://x/q"])
+    u2e = {"https://x/q": parent}
+    same = {"url": "https://x/q", "username": "An", "time": "", "score": "7", "content": "Đồ ăn rất ngon"}
+    # 2 dòng trùng hệt → dedupe còn 1; 1 dòng khác nội dung → giữ riêng
+    df = pd.DataFrame([same, dict(same), {**same, "content": "Phục vụ chu đáo nhiệt tình"}])
+    docs = ingest.build_restaurant_reviews(df, u2e)
+    assert len(docs) == 2
+    assert len({d["id"] for d in docs}) == 2  # id phân biệt theo nội dung
+
+
+def test_build_restaurant_reviews_missing_content_col():
+    # CSV méo (không có cột content/review_text) → trả [] êm, không raise
+    df = pd.DataFrame([{"url": "https://x/q", "score": "8"}])
+    assert ingest.build_restaurant_reviews(df, {"https://x/q": "pid"}) == []
 
 
 def test_acc_review_short_text_dropped():

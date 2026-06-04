@@ -30,6 +30,7 @@ COLLECTION_RESTAURANTS = "restaurants_danang"
 COLLECTION_ACCOMMODATION_HOTELS = "accommodation_hotels_danang"
 COLLECTION_ACCOMMODATION_ROOMS = "accommodation_rooms_danang"
 COLLECTION_ACCOMMODATION_REVIEWS = "accommodation_reviews_danang"
+COLLECTION_RESTAURANT_REVIEWS = "restaurant_reviews_danang"
 
 # Logic độ "cũ" theo crawl-update.txt
 FRESHNESS_HOURS = int(os.getenv("CRAWL_FRESHNESS_HOURS", "24"))   # mới crawl < ngần này → bỏ qua
@@ -41,6 +42,7 @@ DELAY_MIN = float(os.getenv("CRAWL_DELAY_MIN", "0.8"))
 DELAY_MAX = float(os.getenv("CRAWL_DELAY_MAX", "2.5"))
 GOTO_TIMEOUT = int(os.getenv("CRAWL_GOTO_TIMEOUT", "60000"))      # ms
 HEADLESS = os.getenv("CRAWL_HEADLESS", "true").lower() in ("1", "true", "yes")
+REVIEW_CLICK_WAIT_MS = int(os.getenv("CRAWL_REVIEW_CLICK_WAIT_MS", "1200"))  # chờ sau mỗi click "Xem thêm bình luận"
 
 # Auto-discovery (Foody listing API) — tự tìm quán Đà Nẵng, không cần nhập URL tay
 DISCOVERY_ENABLED = os.getenv("CRAWL_DISCOVERY_ENABLED", "true").lower() in ("1", "true", "yes")
