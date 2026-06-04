@@ -1,7 +1,7 @@
 """Auto-discovery quán Đà Nẵng từ API listing công khai của Foody (không cần Playwright).
 
-Dùng endpoint nội bộ __get/Place/HomeListPlace (trả JSON, phân trang theo `page` —
-đúng nghĩa "cào từ trên xuống"). Trả danh sách entity để pipeline crawl chi tiết sau.
+Dùng endpoint nội bộ __get/Place/HomeListPlace (trả JSON, phân trang tăng dần theo `page`
+theo đúng thứ tự API trả về). Trả danh sách entity để pipeline crawl chi tiết sau.
 """
 from __future__ import annotations
 import asyncio

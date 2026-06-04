@@ -1,5 +1,6 @@
 """DB layer (aiosqlite) cho tool crawl-admin — theo pattern backend/app/db."""
 from __future__ import annotations
+import asyncio
 import time
 from pathlib import Path
 from typing import Optional
@@ -9,6 +10,9 @@ import aiosqlite
 from app import config
 
 _db: Optional[aiosqlite.Connection] = None
+# Serialize execute+commit: engine foody ghi đồng thời (asyncio.gather nhiều worker) trên
+# CÙNG 1 connection → khóa để mỗi cặp ghi+commit là nguyên tử, tránh interleave/rowcount sai.
+_wlock = asyncio.Lock()
 
 
 def _now() -> int:
@@ -109,11 +113,12 @@ async def upsert_discovered(
 
 
 async def set_entity_status(url: str, status: str, error: str = "") -> None:
-    await conn().execute(
-        "UPDATE entities SET status = ?, error = ?, updated_at = ? WHERE url = ?",
-        (status, error, _now(), url),
-    )
-    await conn().commit()
+    async with _wlock:
+        await conn().execute(
+            "UPDATE entities SET status = ?, error = ?, updated_at = ? WHERE url = ?",
+            (status, error, _now(), url),
+        )
+        await conn().commit()
 
 
 async def replace_entity_data(
@@ -121,14 +126,15 @@ async def replace_entity_data(
 ) -> None:
     """GHI ĐÈ hoàn toàn thông tin entity sau khi crawl lại (crawl-update.txt #5)."""
     now = _now()
-    await conn().execute(
-        """UPDATE entities SET
-             name = ?, district = ?, data_json = ?, review_count = ?,
-             last_crawl_at = ?, status = 'done', error = '', updated_at = ?
-           WHERE url = ?""",
-        (name, district, data_json, review_count, now, now, url),
-    )
-    await conn().commit()
+    async with _wlock:
+        await conn().execute(
+            """UPDATE entities SET
+                 name = ?, district = ?, data_json = ?, review_count = ?,
+                 last_crawl_at = ?, status = 'done', error = '', updated_at = ?
+               WHERE url = ?""",
+            (name, district, data_json, review_count, now, now, url),
+        )
+        await conn().commit()
 
 
 async def list_entities() -> list[dict]:
@@ -199,8 +205,9 @@ async def set_engine_state(engine: str, last_run_at: int, last_status: str) -> N
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 async def add_log(run_id: Optional[int], level: str, message: str) -> None:
-    await conn().execute(
-        "INSERT INTO crawl_logs (run_id, ts, level, message) VALUES (?, ?, ?, ?)",
-        (run_id, _now(), level, message),
-    )
-    await conn().commit()
+    async with _wlock:
+        await conn().execute(
+            "INSERT INTO crawl_logs (run_id, ts, level, message) VALUES (?, ?, ?, ?)",
+            (run_id, _now(), level, message),
+        )
+        await conn().commit()

@@ -26,7 +26,7 @@ _ws_re = re.compile(r"\s+")
 _embedder = None
 
 
-# ─── Helpers (port verbatim từ qdrant-etl.ipynb) ──────────────────────────────
+# ─── Helpers (port từ notebook ETL qdrant-etl.ipynb của người dùng) ───────────
 def clean_text(text):
     if pd.isna(text):
         return ""
@@ -471,8 +471,11 @@ def ensure_payload_indexes(client, name):
     for field, schema in plan:
         try:
             client.create_payload_index(collection_name=name, field_name=field, field_schema=schema, wait=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            msg = str(exc).lower()
+            # "đã tồn tại" là bình thường (idempotent); lỗi khác (type conflict, auth) cần thấy.
+            if "already exists" not in msg and "conflict" not in msg and "same name" not in msg:
+                print(f"[ingest] index {name}.{field} lỗi: {type(exc).__name__}: {exc}")
 
 
 def upsert_docs(client, name, embedder, docs, log, batch_size=64):
@@ -493,12 +496,16 @@ def upsert_docs(client, name, embedder, docs, log, batch_size=64):
 
 
 def _read_csv(path: Path) -> pd.DataFrame:
+    """Đọc CSV. File KHÔNG tồn tại → DataFrame rỗng (bỏ qua êm). File tồn tại nhưng đọc
+    LỖI → raise (để run bị đánh dấu 'error' thay vì im lặng mất cả 1 collection)."""
     if not path.exists():
         return pd.DataFrame()
     try:
         return pd.read_csv(path, encoding="utf-8-sig", on_bad_lines="skip", engine="python")
-    except Exception:
+    except pd.errors.EmptyDataError:
         return pd.DataFrame()
+    except Exception as exc:
+        raise RuntimeError(f"Đọc {path.name} lỗi: {type(exc).__name__}: {exc}") from exc
 
 
 def _concat(dirs: list[str], fname: str) -> pd.DataFrame:

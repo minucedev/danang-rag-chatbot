@@ -1,4 +1,4 @@
-"""Foody.vn detail crawler — refactor từ crawl/crawl1.py thành hàm tái dùng.
+"""Foody.vn detail crawler — refactor từ crawl/crawl1 (1).py thành hàm tái dùng.
 
 `crawl_detail(page, url)` trả về dict thông tin nhà hàng (hoặc raise nếu lỗi).
 Context/fingerprint tách riêng để pipeline mở nhiều page song song.
@@ -24,7 +24,7 @@ VIEWPORTS = [
     {"width": 1280, "height": 800},
 ]
 
-# Gom toàn bộ field vào 1 lần page.evaluate() (selector lấy nguyên từ crawl1.py đã chạy được)
+# Gom toàn bộ field vào 1 lần page.evaluate() (selector lấy nguyên từ crawl1 (1).py đã chạy được)
 EXTRACT_JS = """
 () => {
     const q  = (sel) => { const el = document.querySelector(sel); return el ? el.innerText.trim() : ""; };
@@ -115,6 +115,9 @@ async def crawl_detail(page: Page, url: str) -> dict:
         pass
 
     raw = await page.evaluate(EXTRACT_JS)
+    # Trích xuất rỗng toàn bộ (DOM Foody đổi / bị chặn) → coi là LỖI thay vì lưu bản ghi trống.
+    if not raw.get("name"):
+        raise RuntimeError("Trích xuất rỗng (tên trống — DOM Foody đổi hoặc bị chặn?)")
 
     time_open, time_close = _parse_open_close(raw.get("price_text", ""))
     price_min, price_max = _parse_price_range(raw.get("price_text", ""))

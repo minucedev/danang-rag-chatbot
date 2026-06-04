@@ -60,7 +60,8 @@ def _write_foody_csv(entities: list[dict]) -> None:
         return
     Path(config.DATA_FOODY).mkdir(parents=True, exist_ok=True)
     path = Path(config.DATA_FOODY) / "restaurant_detail.csv"
-    cols = list(rows[0].keys())
+    # Hợp nhất key qua MỌI row (giữ thứ tự xuất hiện) — tránh mất cột nếu schema lệch giữa các lần crawl.
+    cols = list(dict.fromkeys(k for r in rows for k in r))
     with open(path, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
@@ -180,7 +181,7 @@ def _hotel_runner(make_engine, data_dir: str):
         handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s", "%H:%M:%S"))
         root = logging.getLogger()
         old_level = root.level
-        root.setLevel(logging.INFO)  # uvicorn nâng root lên WARNING → nuốt INFO của engine
+        root.setLevel(logging.INFO)  # root mặc định WARNING (stdlib) → hạ INFO để bắt log INFO engine sync
         root.addHandler(handler)
         try:
             await ctx.log("info", "Khởi chạy engine khách sạn (Playwright sync trong thread)…")
