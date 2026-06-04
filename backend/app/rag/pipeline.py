@@ -31,28 +31,18 @@ _CRAWLABLE_INTENTS = {
     QueryIntent.SPECIFIC_SEARCH,
 }
 
-# Vietnamese few-shot examples to prevent English responses
-_FEW_SHOT = """Ví dụ:
-Câu hỏi: Gợi ý khách sạn 4 sao ở Sơn Trà?
-Trả lời: Dựa trên thông tin hiện có, đây là một số khách sạn 4 sao ở Sơn Trà: 1. Sala Danang Beach Hotel - Đánh giá 9.4/10 (2,581 đánh giá), giá từ 500,000 VND. Khách sạn nằm gần biển, được khách hàng đánh giá rất cao.
-
-Câu hỏi: Nhà hàng hải sản nào ngon ở Đà Nẵng?
-Trả lời: Đà Nẵng có nhiều nhà hàng hải sản nổi tiếng. Dựa trên dữ liệu, tôi gợi ý: ..."""
-
 _SYSTEM_PROMPT = (
     "Bạn là trợ lý du lịch Đà Nẵng thông minh, nhiệt tình và am hiểu địa phương.\n"
     "Nhiệm vụ: Trả lời câu hỏi của khách du lịch dựa trên thông tin được cung cấp.\n\n"
     "Nguyên tắc bắt buộc:\n"
-    "1. TUYỆT ĐỐI KHÔNG dùng các cụm kỹ thuật như \"dựa trên context\", \"theo dữ liệu\", "
-    "\"hệ thống\", \"cơ sở dữ liệu\". Hãy nói chuyện tự nhiên như một hướng dẫn viên bản địa "
-    "đang chia sẻ từ trải nghiệm cá nhân.\n"
-    "2. Chỉ dùng thông tin có thật về địa chỉ, giá cả, đánh giá. KHÔNG bịa đặt hay suy diễn thêm.\n"
-    "3. Nếu không đủ thông tin, thân thiện cho khách biết và gợi ý lựa chọn thay thế.\n"
+    "1. TUYỆT ĐỐI KHÔNG được sử dụng các cụm từ kỹ thuật như 'dựa trên context', 'trong context', 'theo context cung cấp', 'dữ liệu đã cho', 'hệ thống', 'cơ sở dữ liệu', 'CONTEXT', 'thông tin trong CONTEXT', v.v. Hãy nói chuyện tự nhiên như một hướng dẫn viên bản địa thực thụ đang chia sẻ từ kiến thức và trải nghiệm cá nhân.\n"
+    "2. Chỉ dùng các thông tin có thật về địa chỉ, giá cả, đánh giá từ mô tả địa điểm. KHÔNG bịa đặt hay suy diễn thêm.\n"
+    "3. Nếu không đủ thông tin để trả lời, hãy thân thiện cho khách biết và gợi ý lựa chọn thay thế.\n"
     "4. Trả lời bằng tiếng Việt, tự nhiên, hào hứng, hiếu khách.\n"
-    "5. Định dạng rõ ràng: gạch đầu dòng/đánh số khi liệt kê. Mỗi gợi ý: tên, địa chỉ, "
-    "giá tham khảo, điểm nổi bật.\n"
-    "6. Với câu hỏi lịch trình, chia theo ngày rõ ràng.\n"
-    "7. KHÔNG đề xuất địa điểm ngoài Đà Nẵng trừ khi được yêu cầu."
+    "5. Định dạng rõ ràng: dùng gạch đầu dòng hoặc đánh số khi liệt kê nhiều địa điểm. Với mỗi gợi ý: tên, địa chỉ (nếu có), giá tham khảo (nếu có), điểm nổi bật.\n"
+    "6. Với câu hỏi lịch trình (itinerary), chia theo ngày rõ ràng và tuyệt đối không lặp lại địa điểm.\n"
+    "7. KHÔNG đề xuất địa điểm ngoài Đà Nẵng trừ khi được yêu cầu.\n"
+    "8. TUYỆT ĐỐI KHÔNG tự thêm URL, link website hay link đặt chỗ nếu không có sẵn trong dữ liệu."
 )
 
 _CHITCHAT_SYSTEM_PROMPT = (
@@ -64,10 +54,25 @@ _CHITCHAT_SYSTEM_PROMPT = (
 )
 
 _ITINERARY_RULES = (
-    "Hãy lập lịch trình theo từng ngày (Ngày 1, Ngày 2, ...). "
-    "Mỗi ngày gợi ý: buổi sáng (địa điểm tham quan), trưa (nhà hàng), "
-    "chiều (địa điểm hoặc hoạt động), tối (nhà hàng/giải trí), khách sạn (nếu phù hợp). "
-    "Chỉ dùng thông tin từ dữ liệu tham khảo. Ghi kèm đánh giá và địa chỉ cho mỗi gợi ý."
+    "Hãy lập lịch trình chi tiết và hấp dẫn theo từng ngày (Ví dụ: **NGÀY 1:**, **NGÀY 2:**, ...).\n"
+    "Mỗi ngày nên gợi ý: buổi sáng, trưa, chiều, tối. Tất cả các buổi BẮT BUỘC IN HOA (Ví dụ: **SÁNG:**, **TRƯA:**, **CHIỀU:**, **TỐI:**).\n"
+    "TUYỆT ĐỐI KHÔNG đặt mục 'Lưu trú' hoặc 'Khách sạn' vào lịch trình từng ngày.\n"
+    "BẮT BUỘC KHÔNG ĐƯỢC LẶP LẠI địa điểm.\n"
+    "\n# ITINERARY WRITING STYLE & LOGIC (QUY TẮC BẮT BUỘC)\n"
+    "1. Lựa chọn địa điểm và Thời gian:\n"
+    "   - Nơi có Loại 'Nhà hàng/Quán ăn' CHỈ dùng cho mục đích ăn uống hoặc cà phê, KHÔNG dùng làm điểm tham quan.\n"
+    "   - Nơi có Loại 'Điểm tham quan/Vui chơi' (đặc biệt là thiên nhiên, bảo tàng) NÊN ưu tiên xếp vào Sáng hoặc Chiều.\n"
+    "   - Nơi có Loại 'Khách sạn/Lưu trú' BẮT BUỘC gom chung vào một mục **GỢI Ý LƯU TRÚ** ở cuối bài. CHỈ đề xuất 1 khách sạn duy nhất cho toàn bộ chuyến đi.\n"
+    "2. TUYỆT ĐỐI KHÔNG BỊA ĐẶT địa chỉ hay giá tiền. NẾU DỮ LIỆU KHÔNG CÓ GIÁ, KHÔNG ĐƯỢC TỰ Ý GHI 'MIỄN PHÍ' HAY BỊA GIÁ.\n"
+    "3. BẮT BUỘC TRÌNH BÀY theo CẤU TRÚC MẪU dưới đây (gồm đoạn văn và gạch đầu dòng):\n"
+    "\n"
+    "--- CẤU TRÚC MẪU ---\n"
+    "**SÁNG/TRƯA/CHIỀU/TỐI:** [Điền Tên địa điểm]. [Viết đoạn văn lý do...]\n"
+    "- Địa chỉ: [Điền Địa chỉ từ dữ liệu]\n"
+    "- Chi phí: [Ghi rõ 'Mức giá:' đối với nhà hàng, 'Giá vé:' đối với điểm tham quan. NẾU TRONG DỮ LIỆU KHÔNG CÓ DÒNG NÀO GHI 'GIÁ:', BẠN BẮT BUỘC PHẢI XÓA HẲN DÒNG CHI PHÍ NÀY, KHÔNG TỰ BỊA!]\n"
+    "--------------------\n"
+    "\n"
+    "4. KHÔNG IN RA các số thứ tự như [1], [2] vào bài viết.\n"
 )
 
 # Prompt rút gọn cho nhánh Gemini fallback: không có "Reference data" nên không
@@ -133,24 +138,38 @@ def _build_gemini_messages(
     query: str,
     history: list[dict],
     intent: QueryIntent,
+    session_summary: Optional[str] = None
 ) -> list[dict]:
     messages = [{"role": "system", "content": _GEMINI_SYSTEM_PROMPT}]
-    messages.extend(build_history_messages(history, config.MAX_HISTORY_TURNS))
+    from app.rag.manager import build_final_context_prompt
+    history_msgs = build_final_context_prompt(session_summary, history)
+    messages.extend(history_msgs)
     messages.append({"role": "user", "content": query})
     return messages
 
 
-def _format_context(results: List[SearchResultSchema]) -> str:
+def _format_context(results: List[SearchResultSchema], max_items: int = 8, max_chars: int = 4000) -> str:
     if not results:
         return "Không có thông tin phù hợp với yêu cầu."
     parts = []
     total = 0
-    for i, r in enumerate(results[:8], 1):
+    for i, r in enumerate(results[:max_items], 1):
         lines = [f"[{i}] {r.get_display_name()}"]
-        lines.append(f"   - Loại: {r.collection}")
+        
+        coll_type = r.collection
+        if "restaurant" in coll_type:
+            coll_type = "Nhà hàng/Quán ăn"
+        elif "place" in coll_type:
+            coll_type = "Điểm tham quan/Vui chơi"
+        elif "accommodation" in coll_type:
+            coll_type = "Khách sạn/Lưu trú"
+            
+        lines.append(f"   - Loại: {coll_type}")
         lines.append(f"   - Quận/Huyện: {r.district or 'Chưa có'}")
         lines.append(f"   - Đánh giá: {r.get_rating_display()}")
-        lines.append(f"   - Giá: {r.get_price_display()}")
+        price_display = r.get_price_display()
+        if price_display and price_display != "Không có thông tin giá":
+            lines.append(f"   - Giá: {price_display}")
         lines.append(f"   - Địa chỉ: {r.get_address_display()}")
         # Trường giàu (đã có sẵn trên SearchResultSchema) — giúp synthesizer trả lời sát hơn.
         if r.cuisine:
@@ -163,8 +182,12 @@ def _format_context(results: List[SearchResultSchema]) -> str:
             lines.append(f"   - View: {r.room_view}")
         if r.tags:
             lines.append(f"   - Đặc điểm: {', '.join(r.tags)}")
-        if r.time_open and r.time_close:
+        if r.opening_hours:
+            lines.append(f"   - Giờ mở cửa: {r.opening_hours}")
+        elif r.time_open and r.time_close:
             lines.append(f"   - Giờ mở cửa: {r.time_open} - {r.time_close}")
+        elif r.time_open:
+            lines.append(f"   - Giờ mở cửa: {r.time_open}")
         if r.content:
             lines.append(f"   - Nội dung: {r.content[:300]}")
         if r.room_name:
@@ -174,7 +197,7 @@ def _format_context(results: List[SearchResultSchema]) -> str:
             lines.append(f"   - Phòng: {r.room_name}{cap}{area}{bed}")
         block = "\n".join(lines)
         # Cắt theo ngân sách ký tự để prompt không phình quá lớn.
-        if total + len(block) > config.MAX_CONTEXT_CHARS and parts:
+        if total + len(block) > max_chars and parts:
             break
         total += len(block)
         parts.append(block)
@@ -234,29 +257,56 @@ def _norm_match_text(text: str) -> str:
 _UNKNOWN_NAMES = {"unknown", "đang cập nhật"}
 
 
-def _find_exact_matches(
-    query: str, results: List[SearchResultSchema]
-) -> List[SearchResultSchema]:
-    """Lọc các kết quả mà TÊN thực thể thực sự xuất hiện trong câu hỏi (ported từ notebook).
+def _unaccent(s: str) -> str:
+    s = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', s)
+    s = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', s)
+    s = re.sub(r'[ìíịỉĩ]', 'i', s)
+    s = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', s)
+    s = re.sub(r'[ùúụủũưừứựửữ]', 'u', s)
+    s = re.sub(r'[ỳýỵỷỹ]', 'y', s)
+    s = re.sub(r'[đ]', 'd', s)
+    return s
 
-    Hỗ trợ dạng 'Tên gốc - Chi nhánh': base phải nằm trong query, và nếu có chi nhánh thì
-    chi nhánh (hoặc 1 từ >3 ký tự của nó) cũng phải xuất hiện để tránh nhầm chi nhánh khác.
-    """
+def _get_sig_words(text: str) -> set[str]:
+    text = _unaccent(str(text).lower())
+    words = set(re.findall(r'\b\w+\b', text))
+    stopwords = {"khach", "san", "nha", "hang", "quan", "co", "khong", "la", "va", "cua", "o", "da", "nang", "danang", "banh", "xeo", "hai", "san", "hotel", "restaurant", "cafe", "coffee", "ba", "chu", "ong", "di"}
+    return {w for w in words if w not in stopwords and len(w) > 1}
+
+def _find_exact_matches(
+    query: str, results: List[SearchResultSchema], extracted_entity: str = ""
+) -> List[SearchResultSchema]:
+    """Lọc các kết quả mà TÊN thực thể thực sự xuất hiện trong câu hỏi hoặc là một phần của tên DB."""
     query_lower = _norm_match_text(query)
+    
+    # Ưu tiên dùng thực thể LLM bóc tách, nếu không có thì dùng query
+    entity_to_check = extracted_entity if extracted_entity else query
+    query_words = _get_sig_words(entity_to_check)
+    
     matches: List[SearchResultSchema] = []
     for r in results:
         name = _norm_match_text(r.get_display_name())
         if not name or name in _UNKNOWN_NAMES:
             continue
+        
         base_name, branch_name = name, ""
         if " - " in name:
             base_name, branch_name = name.split(" - ", 1)
+            
+        # 1. Match substring truyền thống
         if len(base_name) >= 4 and base_name in query_lower:
             if branch_name:
                 branch_words = [w for w in branch_name.split() if len(w) > 3]
                 if branch_name not in query_lower and not any(w in query_lower for w in branch_words):
                     continue
             matches.append(r)
+            continue
+            
+        # 2. Match theo token (từ khóa đặc trưng)
+        db_words = _get_sig_words(base_name)
+        if query_words and query_words.issubset(db_words):
+            matches.append(r)
+            
     return matches
 
 
@@ -315,57 +365,55 @@ def _build_event_messages(
 
 
 def _build_messages(
-    query: str,
-    results: List[SearchResultSchema],
+    standalone_q: str,
+    results: list[SearchResultSchema],
     history: list[dict],
     intent: QueryIntent,
+    session_summary: Optional[str] = None
 ) -> list[dict]:
-    context = _format_context(results)
-    empty_note = "" if results else "\nLưu ý: Không tìm thấy kết quả phù hợp. Hãy thông báo cho người dùng và gợi ý nới lỏng bộ lọc.\n"
+    max_ctx_items = 30 if intent == QueryIntent.ITINERARY_SEARCH else 8
+    max_ctx_chars = 15000 if intent == QueryIntent.ITINERARY_SEARCH else config.MAX_CONTEXT_CHARS
+    context = _format_context(results, max_items=max_ctx_items, max_chars=max_ctx_chars)
 
-    if intent == QueryIntent.SPECIFIC_SEARCH:
-        rules = """### QUY TẮC BẮT BUỘC KHI TRẢ LỜI (TUÂN THỦ TUYỆT ĐỐI):
-1. TRẢ LỜI ĐÚNG TRỌNG TÂM: Chỉ tập trung cung cấp đầy đủ thông tin (Địa chỉ, Đánh giá, Giá cả, Mô tả) của ĐÚNG địa điểm/khách sạn/nhà hàng được yêu cầu trong câu hỏi.
-2. TUYỆT ĐỐI KHÔNG GỢI Ý LUNG TUNG: Không liệt kê thêm các khách sạn/nhà hàng đối thủ khác mang tính chất so sánh hay đề xuất danh sách "Top 3". Người dùng chỉ cần thông tin của địa điểm họ hỏi.
-3. KHÔNG ẢO GIÁC: Chỉ dùng thông tin trong mục "Thông tin tham khảo". Không tự bịa ra thông tin nằm ngoài ngữ cảnh.
-4. XỬ LÝ KHI TRỐNG DỮ LIỆU: Nếu mục "Thông tin tham khảo" trống, hãy trả lời lịch sự: "Hiện hệ thống không tìm thấy thông tin của [tên địa điểm] trong cơ sở dữ liệu." """
-    elif intent == QueryIntent.ITINERARY_SEARCH:
-        rules = f"""### QUY TẮC BẮT BUỘC KHI TRẢ LỜI (TUÂN THỦ TUYỆT ĐỐI):
-{_ITINERARY_RULES}
-KHÔNG ẢO GIÁC — chỉ dùng địa điểm/nhà hàng/khách sạn có trong dữ liệu tham khảo."""
+    hint = ""
+    if intent == QueryIntent.CHITCHAT or not results:
+        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        from app.rag.manager import build_final_context_prompt
+        history_msgs = build_final_context_prompt(session_summary, history)
+        messages.extend(history_msgs)
+        messages.append({"role": "user", "content": standalone_q})
+        return messages
+
+    if intent == QueryIntent.ITINERARY_SEARCH:
+        hint = "Hãy viết theo văn phong tư vấn du lịch tự nhiên (không dùng format dạng list dữ liệu thô). Trình bày mỗi buổi bằng một đoạn văn ngắn, khéo léo lồng ghép tên địa điểm, vị trí, lý do đề xuất và chi phí (nếu có). Mục Khách sạn ở cuối cũng viết thành đoạn văn tư vấn. Tôn trọng quy tắc KHÔNG lặp địa điểm."
     elif intent == QueryIntent.REVIEW_SEARCH:
-        rules = """### QUY TẮC BẮT BUỘC KHI TRẢ LỜI (TUÂN THỦ TUYỆT ĐỐI):
-1. Tổng hợp nhận xét của khách, phân biệt rõ điểm tốt và điểm chưa tốt nếu có.
-2. KHÔNG ẢO GIÁC: chỉ dùng thông tin trong "Thông tin tham khảo".
-3. Nếu trống dữ liệu, lịch sự thông báo chưa có đánh giá phù hợp.
-4. Trả lời bằng tiếng Việt, thân thiện."""
+        hint = "Tổng hợp nhận xét, phân biệt điểm tốt và chưa tốt nếu có."
     elif intent == QueryIntent.ROOM_SEARCH:
-        rules = """### QUY TẮC BẮT BUỘC KHI TRẢ LỜI (TUÂN THỦ TUYỆT ĐỐI):
-1. Tập trung thông tin phòng: loại phòng, tiện ích, diện tích, sức chứa, giá, view.
-2. KHÔNG ẢO GIÁC: chỉ dùng thông tin trong "Thông tin tham khảo".
-3. Đề xuất tối đa 3-5 lựa chọn phù hợp nhất kèm giá và đánh giá.
-4. Trả lời bằng tiếng Việt, thân thiện."""
-    else:
-        rules = """### QUY TẮC BẮT BUỘC KHI TRẢ LỜI (TUÂN THỦ TUYỆT ĐỐI):
-1. KHÔNG ẢO GIÁC: Chỉ được sử dụng thông tin được cung cấp trong mục "Thông tin tham khảo". KHÔNG TỰ Ý BỊA RA tên địa điểm, giá cả hoặc địa chỉ nằm ngoài ngữ cảnh trên.
-2. XỬ LÝ KHI THIẾU THÔNG TIN: Nếu mục "Thông tin tham khảo" bị trống hoặc ghi "KHÔNG CÓ DỮ LIỆU PHÙ HỢP", hãy trả lời lịch sự rằng: "Hiện tại hệ thống không tìm thấy kết quả nào thỏa mãn chính xác các tiêu chí của bạn trong cơ sở dữ liệu." Tuyệt đối không tự suy diễn thông tin bên ngoài.
-3. ĐỀ XUẤT PHÙ HỢP: Nếu dữ liệu có sẵn, hãy đề xuất tối đa TOP 3 lựa chọn phù hợp nhất, kèm theo Đánh giá (Rating), Giá cả và Địa chỉ rõ ràng.
-4. Giữ phong thái chuyên nghiệp, thân thiện và phản hồi hoàn toàn bằng tiếng Việt."""
+        hint = "Tập trung vào thông tin phòng: loại phòng, tiện ích, diện tích, giá."
+    elif intent == QueryIntent.SPECIFIC_SEARCH:
+        query_lower = standalone_q.lower()
+        asks_for_reviews = any(w in query_lower for w in ["đánh giá", "nhận xét", "review", "khen", "chê", "thấy sao", "tốt không"])
+        if asks_for_reviews:
+            hint = "Tổng hợp nhận xét thành các điểm khen/chê nổi bật, trình bày tự nhiên, lưu loát."
+        else:
+            hint = "Hãy trả lời tự nhiên, thân thiện và lưu loát. Bạn có thể khéo léo lồng ghép thêm địa chỉ, giá cả, và các thông tin thú vị (ví dụ: đặc điểm nổi bật, món ăn ngon, phong cách) để giống một trợ lý du lịch nhiệt tình. LUÔN thêm câu: 'Ngoài ra, bạn có thể tham khảo thêm thông tin chi tiết trên thẻ địa điểm nhé!' vào cuối."
 
-    user_prompt = f"""{_FEW_SHOT}
+    user_prompt = f"""THÔNG TIN ĐỊA ĐIỂM DU LỊCH ĐÀ NẴNG:
+{context}
 
-### Câu hỏi:
-{query}
+---
+Câu hỏi: {standalone_q}
 
-### Thông tin tham khảo:
-{context}{empty_note}
+Hướng dẫn bổ sung: {hint}"""
 
-{rules}
+    system_content = _SYSTEM_PROMPT
+    if intent == QueryIntent.ITINERARY_SEARCH:
+        system_content += "\n\n" + _ITINERARY_RULES
 
-### Trả lời:"""
-
-    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
-    messages.extend(build_history_messages(history, config.MAX_HISTORY_TURNS))
+    messages = [{"role": "system", "content": system_content}]
+    from app.rag.manager import build_final_context_prompt
+    history_msgs = build_final_context_prompt(session_summary, history)
+    messages.extend(history_msgs)
     messages.append({"role": "user", "content": user_prompt})
     return messages
 
@@ -383,7 +431,17 @@ class RAGPipeline:
         self.llm = llm
         self.client = qdrant_client
         self.reranker = reranker
+
         self.analyzer = LLMQueryAnalyzer(analyzer_llm or llm)
+        from app.rag.manager import ConversationManager
+        self.conversation_manager = ConversationManager(analyzer_llm or llm)
+
+    async def _background_update_summary(self, session_id: str, history: list[dict]):
+        from app.db import sessions as db
+        loop = asyncio.get_running_loop()
+        summary_str = await loop.run_in_executor(None, self.conversation_manager.summarize_history, history)
+        if summary_str:
+            await db.update_session_summary(session_id, summary_str)
 
     async def answer_stream(
         self,
@@ -401,21 +459,37 @@ class RAGPipeline:
             stop_event = threading.Event()
 
         # [TIMING] instrumentation — tạm thời, sẽ xóa sau khi xong tối ưu
+        session_summary = None
+        if session_id:
+            from app.db import sessions as db
+            session = await db.get_session(session_id)
+            if session:
+                session_summary = session.summary
+            if len(history) >= 10:
+                asyncio.create_task(self._background_update_summary(session_id, history))
+
         t_start = time.perf_counter()
 
-        q = normalize_nfc(query)
-
-        # 1. Enrich query với lịch sử TRƯỚC (giữ multi-turn), rồi đưa vào
-        #    LLMQueryAnalyzer. Analyzer là 1 lượt generate blocking — chạy qua
-        #    run_in_executor để event loop rảnh cho disconnect-check + SSE ping.
-        search_q = build_search_query(history, q)
-        t_history = time.perf_counter()
-        print(f"[TIMING] history_enrich: {(t_history - t_start)*1000:.0f}ms")
-
         loop = asyncio.get_running_loop()
-        analysis = await loop.run_in_executor(None, self.analyzer.analyze, search_q)
+
+        # 1. Phân tích ngữ cảnh hội thoại (Follow-up, Topic shift) bằng ConversationManager
+        t_resolve_start = time.perf_counter()
+        resolved = await loop.run_in_executor(None, self.conversation_manager.resolve_context, query, history)
+        
+        standalone_q = normalize_nfc(resolved["standalone_query"])
+        is_topic_shift = resolved.get("is_topic_shift", False)
+        
+        # Nếu đổi chủ đề hoàn toàn, ta có thể clear history cho lần query này để tránh nhiễu
+        if is_topic_shift:
+            history = []
+            
+        t_resolve_done = time.perf_counter()
+        print(f"[TIMING] resolve_context: {(t_resolve_done - t_resolve_start)*1000:.0f}ms")
+
+        # 2. Phân tích Intent & Filter từ câu hỏi độc lập (standalone_q)
+        analysis = await loop.run_in_executor(None, self.analyzer.analyze, standalone_q)
         t_analyzer = time.perf_counter()
-        print(f"[TIMING] analyzer: {(t_analyzer - t_history)*1000:.0f}ms "
+        print(f"[TIMING] analyzer: {(t_analyzer - t_resolve_done)*1000:.0f}ms "
               f"(source={analysis['source']}, intent={analysis['intent'].value})")
 
         intent = analysis["intent"]
@@ -450,7 +524,7 @@ class RAGPipeline:
             yield {"type": "sources", "items": [], "total": 0}
             chitchat_messages = [{"role": "system", "content": _CHITCHAT_SYSTEM_PROMPT}]
             chitchat_messages.extend(build_history_messages(history, config.MAX_HISTORY_TURNS))
-            chitchat_messages.append({"role": "user", "content": q})
+            chitchat_messages.append({"role": "user", "content": standalone_q})
             chitchat_messages = _with_profile(chitchat_messages)
             async for token in generate_streaming(
                 chitchat_messages, self.llm, stop_event,
@@ -470,7 +544,7 @@ class RAGPipeline:
                 events = []
             sources = events[:10]
             yield {"type": "sources", "items": sources, "total": len(sources)}
-            messages = _with_profile(_build_event_messages(q, events, history))
+            messages = _with_profile(_build_event_messages(standalone_q, events, history))
             t_before_gen = time.perf_counter()
             first_token_logged = False
             token_count = 0
@@ -494,23 +568,64 @@ class RAGPipeline:
 
         # 3. Retrieve bằng rewritten_query với top_k cao hơn để reranker có đủ candidates
         t_retrieve_start = time.perf_counter()
-        results = await retrieve_by_intent(
-            query=rewritten,
-            client=self.client,
-            encoder=self.encoder,
-            intent=intent,
-            top_k_per_collection=config.TOP_K_RETRIEVE,
-            filters=merged,
-            score_threshold=config.SCORE_THRESHOLD,
-        )
+        skip_global_rerank = False
+        
+        if intent == QueryIntent.ITINERARY_SEARCH:
+            print("📚 [Itinerary Mode] Phân luồng tìm kiếm song song...")
+            q_places = f"địa điểm du lịch vui chơi tham quan {rewritten}"
+            q_rests = f"nhà hàng quán ăn đặc sản ngon {rewritten}"
+            q_hotels = f"khách sạn homestay resort lưu trú {rewritten}"
+            
+            async def _search_and_rerank(sub_q, sub_intent):
+                sub_res = await retrieve_by_intent(
+                    query=sub_q, client=self.client, encoder=self.encoder,
+                    intent=sub_intent, top_k_per_collection=config.TOP_K_RETRIEVE * 2,
+                    filters=merged, score_threshold=config.SCORE_THRESHOLD
+                )
+                if not sub_res:
+                    return []
+                
+                sub_k = 12 if sub_intent in [QueryIntent.PLACE_SEARCH, QueryIntent.RESTAURANT_SEARCH] else 6
+                
+                from app.rag.rerank import rerank_results
+                return await rerank_results(
+                    sub_res, sub_q, self.reranker,
+                    top_k=sub_k,
+                    score_threshold=config.RERANK_SCORE_THRESHOLD,
+                    intent=sub_intent,
+                    extracted=analysis
+                )
+            
+            res_pl, res_re, res_ho = await asyncio.gather(
+                _search_and_rerank(q_places, QueryIntent.PLACE_SEARCH),
+                _search_and_rerank(q_rests, QueryIntent.RESTAURANT_SEARCH),
+                _search_and_rerank(q_hotels, QueryIntent.HOTEL_SEARCH),
+            )
+            # Trộn xen kẽ (interleave) để đảm bảo LLM nhận được đủ cả Địa điểm, Nhà hàng, Khách sạn
+            # trong trường hợp bị giới hạn max_chars cắt mất phần cuối.
+            results = []
+            for i in range(max(len(res_pl), len(res_re), len(res_ho))):
+                if i < len(res_pl): results.append(res_pl[i])
+                if i < len(res_re): results.append(res_re[i])
+                if i < len(res_ho): results.append(res_ho[i])
+            skip_global_rerank = True
+        else:
+            results = await retrieve_by_intent(
+                query=rewritten,
+                client=self.client,
+                encoder=self.encoder,
+                intent=intent,
+                top_k_per_collection=config.TOP_K_RETRIEVE,
+                filters=merged,
+                score_threshold=config.SCORE_THRESHOLD,
+            )
+            
         t_retrieve = time.perf_counter()
-        print(f"[TIMING] retrieve_total: {(t_retrieve - t_retrieve_start)*1000:.0f}ms "
-              f"({len(results)} hits)")
+        print(f"[TIMING] retrieve_total: {(t_retrieve - t_retrieve_start)*1000:.0f}ms ({len(results)} hits)")
 
         # 4. BGE reranker (+ heuristic) → dedup. Heuristic chạy cả khi reranker tắt:
-        #    rerank_results tự dùng điểm cosine làm base khi self.reranker is None.
         t_rerank_start = time.perf_counter()
-        if results:
+        if results and not skip_global_rerank:
             results = await rerank_results(
                 results, rewritten, self.reranker,
                 top_k=config.TOP_K_RERANK,
@@ -523,51 +638,54 @@ class RAGPipeline:
         print(f"[TIMING] rerank+dedup: {(t_rerank - t_rerank_start)*1000:.0f}ms "
               f"(-> {len(results)} after dedup)")
 
-        # 4.5. Exact name fallback cho SPECIFIC_SEARCH khi không có kết quả.
-        #      Ưu tiên tên thực thể đã trích (analysis["entity"]) — sạch hơn rewritten
-        #      vì không lẫn từ hỏi đáp; rỗng thì lùi về rewritten.
-        if not results and intent == QueryIntent.SPECIFIC_SEARCH:
+        # 4.5. Exact name fallback cho SPECIFIC_SEARCH (bypass reranker)
+        if intent == QueryIntent.SPECIFIC_SEARCH:
             search_name = " ".join(analysis.get("entity") or []).strip() or rewritten
             raw_fallback = await exact_name_search(search_name, self.client)
-            results = _dedup_by_display_name(raw_fallback)
-            if results:
-                print(f"[pipeline] exact_name_search found {len(results)} fallback results")
+            if raw_fallback:
+                # Ưu tiên fallback lên đầu, sau đó đến kết quả vector
+                results = _dedup_by_display_name(raw_fallback + results)
+                print(f"[pipeline] exact_name_search added {len(raw_fallback)} fallback results")
 
         # 4.55. SPECIFIC_SEARCH: nếu có khớp đúng tên → thu hẹp về đúng thực thể được hỏi;
         #       nếu chỉ có gần đúng → phát thông điệp gợi ý "có phải bạn muốn tìm..." rồi dừng.
         specific_no_exact = False
         if intent == QueryIntent.SPECIFIC_SEARCH and results:
-            exact = _find_exact_matches(q, results)
+            extracted_ent = " ".join(analysis.get("entity") or []).strip()
+            exact = _find_exact_matches(standalone_q, results, extracted_entity=extracted_ent)
             if exact:
                 results = exact[:config.MAX_ALTERNATIVES]
             else:
                 specific_no_exact = True
 
-        sources = [r.to_dict() for r in results[:10]]
+        max_sources = 30 if intent == QueryIntent.ITINERARY_SEARCH else 10
+        sources = [r.to_dict() for r in results[:max_sources]]
         yield {"type": "sources", "items": sources, "total": len(sources)}
 
         if specific_no_exact:
             # Không tìm thấy đúng thực thể — log để crawler bổ sung + trả gợi ý tương tự.
             if intent in _CRAWLABLE_INTENTS:
                 try:
-                    await log_missed_query(q, rewritten, intent.value, session_id)
+                    await log_missed_query(standalone_q, rewritten, intent.value, session_id)
                 except Exception as _log_exc:
                     print(f"[pipeline] log_missed_query failed: {type(_log_exc).__name__}: {_log_exc}")
-            yield {"type": "token", "text": _build_specific_fallback(q, results)}
+            
+            display_name = " ".join(analysis.get("entity") or []).strip() or standalone_q
+            yield {"type": "token", "text": _build_specific_fallback(display_name, results)}
             yield {"type": "done"}
             return
 
         # 4.6. Log missed query nếu không có kết quả và là intent crawlable
         if not results and intent in _CRAWLABLE_INTENTS:
             try:
-                await log_missed_query(q, rewritten, intent.value, session_id)
+                await log_missed_query(standalone_q, rewritten, intent.value, session_id)
             except Exception as _log_exc:
                 print(f"[pipeline] log_missed_query failed: {type(_log_exc).__name__}: {_log_exc}")
 
         # 3.5. Fallback sang Gemini khi retrieve trả 0 kết quả (chỉ khi không dùng Gemini primary).
         # Khi USE_GEMINI_GENERATION=True, path này bị skip — Gemini primary xử lý luôn cả no-results.
         if not results and config.GEMINI_API_KEY and not config.USE_GEMINI_GENERATION:
-            gemini_messages = _with_profile(_build_gemini_messages(q, history, intent))
+            gemini_messages = _with_profile(_build_gemini_messages(standalone_q, history, intent, session_summary))
             committed_to_gemini = False
             gemini_tokens = 0
             t_gemini_start = time.perf_counter()
@@ -621,8 +739,8 @@ class RAGPipeline:
                     return
                 # Chưa committed → client chưa thấy gì về Gemini, fall through im lặng.
 
-        # 4. Build prompt (hiển thị q gốc cho UX) — rẽ nhánh theo intent
-        messages = _with_profile(_build_messages(q, results, history, intent))
+        # 4. Build prompt (hiển thị standalone_q gốc cho UX) — rẽ nhánh theo intent
+        messages = _with_profile(_build_messages(standalone_q, results, history, intent, session_summary))
         prompt_chars = sum(len(m["content"]) for m in messages)
         print(f"[TIMING] prompt_built: {prompt_chars} chars across {len(messages)} msgs")
 
@@ -641,7 +759,7 @@ class RAGPipeline:
             # Không có dữ liệu nội bộ → để Gemini trả lời từ kiến thức chung (kèm disclaimer)
             # thay vì bám reference rỗng rồi báo "không tìm thấy". Missed query vẫn được log
             # ở trên để crawler bổ sung địa điểm thật sau.
-            gen_messages = messages if results else _with_profile(_build_gemini_messages(q, history, intent))
+            gen_messages = messages if results else _with_profile(_build_gemini_messages(standalone_q, history, intent, session_summary))
             buffered: list[str] = []
             try:
                 async for token in generate_gemini_streaming(

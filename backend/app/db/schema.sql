@@ -2,7 +2,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     id          TEXT    PRIMARY KEY,
     title       TEXT    NOT NULL,
     created_at  INTEGER NOT NULL,
-    updated_at  INTEGER NOT NULL
+    updated_at  INTEGER NOT NULL,
+    summary     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (

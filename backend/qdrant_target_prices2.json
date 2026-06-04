@@ -1,0 +1,30 @@
+[
+  {
+    "collection": "places_danang",
+    "name": "Suối Hoa",
+    "rating": 6.8,
+    "min_price": null,
+    "max_price": null
+  },
+  {
+    "collection": "places_danang",
+    "name": "Làng Mê",
+    "rating": 8.72,
+    "min_price": null,
+    "max_price": null
+  },
+  {
+    "collection": "places_danang",
+    "name": "Thác Ba Đờ Phọt",
+    "rating": 9.6,
+    "min_price": null,
+    "max_price": null
+  },
+  {
+    "collection": "places_danang",
+    "name": "Khu du lịch sinh thái Suối Hoa",
+    "rating": 7.0,
+    "min_price": null,
+    "max_price": null
+  }
+]

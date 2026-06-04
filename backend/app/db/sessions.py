@@ -46,7 +46,7 @@ async def create_session(title: str) -> str:
     sid = str(uuid.uuid4())
     now = int(time.time())
     await _db_conn().execute(
-        "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO sessions (id, title, created_at, updated_at, summary) VALUES (?, ?, ?, ?, NULL)",
         (sid, title, now, now),
     )
     await _db_conn().commit()
@@ -55,7 +55,7 @@ async def create_session(title: str) -> str:
 
 async def list_sessions(limit: int = 50, offset: int = 0) -> List[SessionEntity]:
     async with _db_conn().execute(
-        "SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+        "SELECT id, title, created_at, updated_at, summary FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
         (limit, offset),
     ) as cur:
         rows = await cur.fetchall()
@@ -64,11 +64,18 @@ async def list_sessions(limit: int = 50, offset: int = 0) -> List[SessionEntity]
 
 async def get_session(session_id: str) -> Optional[SessionEntity]:
     async with _db_conn().execute(
-        "SELECT id, title, created_at, updated_at FROM sessions WHERE id = ?",
+        "SELECT id, title, created_at, updated_at, summary FROM sessions WHERE id = ?",
         (session_id,),
     ) as cur:
         row = await cur.fetchone()
     return SessionEntity(**dict(row)) if row else None
+
+async def update_session_summary(session_id: str, summary: str) -> None:
+    await _db_conn().execute(
+        "UPDATE sessions SET summary = ?, updated_at = ? WHERE id = ?",
+        (summary, int(time.time()), session_id),
+    )
+    await _db_conn().commit()
 
 
 async def rename_session(session_id: str, new_title: str) -> None:

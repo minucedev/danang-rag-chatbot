@@ -1,0 +1,79 @@
+[
+  {
+    "collection": "places_danang",
+    "name": "Bảo tàng Đồng Đình",
+    "min_price": null,
+    "max_price": null,
+    "price_level": "mid"
+  },
+  {
+    "collection": "places_danang",
+    "name": "Suối khoáng nóng Núi Thần Tài",
+    "min_price": null,
+    "max_price": null,
+    "price_level": "high"
+  },
+  {
+    "collection": "places_danang",
+    "name": "Suối Hoa",
+    "min_price": null,
+    "max_price": null,
+    "price_level": "budget"
+  },
+  {
+    "collection": "places_danang",
+    "name": "Công viên 29.3",
+    "min_price": null,
+    "max_price": null,
+    "price_level": "budget"
+  },
+  {
+    "collection": "places_danang",
+    "name": "Khu du lịch sinh thái Suối Hoa",
+    "min_price": null,
+    "max_price": null,
+    "price_level": null
+  },
+  {
+    "collection": "restaurants_danang",
+    "name": "Magic Pan Food Palace - Vincom Center Đà Nẵng",
+    "min_price": 500000,
+    "max_price": 2000000,
+    "price_level": "luxury"
+  },
+  {
+    "collection": "restaurants_danang",
+    "name": "Bánh Xèo Tôm Nhảy Năm Hiền",
+    "min_price": 70000,
+    "max_price": 180000,
+    "price_level": "mid"
+  },
+  {
+    "collection": "restaurants_danang",
+    "name": "Bánh Xèo Tôm Nhảy Năm Hiền - Phan Đăng Lưu",
+    "min_price": 150000,
+    "max_price": 500000,
+    "price_level": "mid"
+  },
+  {
+    "collection": "restaurants_danang",
+    "name": "Lão Đại Seafood",
+    "min_price": 350000,
+    "max_price": 5000000,
+    "price_level": "high"
+  },
+  {
+    "collection": "restaurants_danang",
+    "name": "Central Market - The Vietnam Hostel",
+    "min_price": 5000000,
+    "max_price": 20000000,
+    "price_level": "luxury"
+  },
+  {
+    "collection": "accommodation_hotels_danang",
+    "name": "Happy Day Riverside Hotel & Spa Danang",
+    "min_price": 542933,
+    "max_price": 606061,
+    "price_level": "mid"
+  }
+]

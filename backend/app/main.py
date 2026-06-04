@@ -96,17 +96,22 @@ async def lifespan(app: FastAPI):
     else:
         print("Reranker disabled (ENABLE_RERANKER=false) — skipping to save memory.")
 
-    print(f"Loading LLM ({config.LLM_HF_MODEL_NAME})...")
+    if config.USE_GGUF:
+        print(f"Loading LLM (GGUF: {config.LLM_GGUF_PATH})...")
+    else:
+        print(f"Loading LLM ({config.LLM_HF_MODEL_NAME})...")
+
     try:
         llm = load_llm()
     except Exception as exc:
+        model_desc = config.LLM_GGUF_PATH if config.USE_GGUF else config.LLM_HF_MODEL_NAME
         raise RuntimeError(
-            f"[startup] FATAL: Failed to load main LLM '{config.LLM_HF_MODEL_NAME}': "
+            f"[startup] FATAL: Failed to load main LLM '{model_desc}': "
             f"{type(exc).__name__}: {exc}"
         ) from exc
 
     analyzer_llm = llm
-    if config.ANALYZER_HF_MODEL_NAME != config.LLM_HF_MODEL_NAME:
+    if not config.USE_GGUF and config.ANALYZER_HF_MODEL_NAME != config.LLM_HF_MODEL_NAME:
         print(f"Loading analyzer model ({config.ANALYZER_HF_MODEL_NAME})...")
         try:
             analyzer_llm = load_analyzer_llm()
