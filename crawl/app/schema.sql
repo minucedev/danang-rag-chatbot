@@ -29,9 +29,18 @@ CREATE TABLE IF NOT EXISTS entities (
 );
 CREATE INDEX IF NOT EXISTS idx_entities_last_crawl ON entities(last_crawl_at);
 
+-- Trạng thái mỗi engine (foody/agoda/booking) — để gate freshness theo engine
+CREATE TABLE IF NOT EXISTS engine_state (
+    engine       TEXT    PRIMARY KEY,        -- 'foody'|'agoda'|'booking'
+    last_run_at  INTEGER,
+    last_status  TEXT    NOT NULL DEFAULT '',
+    enabled      INTEGER NOT NULL DEFAULT 1
+);
+
 -- Lịch sử mỗi lần chạy crawl
 CREATE TABLE IF NOT EXISTS crawl_runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    engine      TEXT    NOT NULL DEFAULT '',
     trigger     TEXT    NOT NULL DEFAULT 'manual',
     started_at  INTEGER NOT NULL,
     finished_at INTEGER,

@@ -92,6 +92,22 @@ async def ensure_entity(entity_id: str, url: str, source_id: Optional[int]) -> N
     await conn().commit()
 
 
+async def upsert_discovered(
+    entity_id: str, url: str, name: str, district: str, review_count: Optional[int]
+) -> bool:
+    """Thêm entity phát hiện từ discovery (kèm info cơ bản từ API) nếu CHƯA có.
+    KHÔNG ghi đè entity đã crawl. Trả True nếu là entity mới."""
+    now = _now()
+    cur = await conn().execute(
+        """INSERT INTO entities (id, url, name, district, review_count, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(url) DO NOTHING""",
+        (entity_id, url, name, district, review_count, now, now),
+    )
+    await conn().commit()
+    return cur.rowcount > 0
+
+
 async def set_entity_status(url: str, status: str, error: str = "") -> None:
     await conn().execute(
         "UPDATE entities SET status = ?, error = ?, updated_at = ? WHERE url = ?",
@@ -123,10 +139,10 @@ async def list_entities() -> list[dict]:
 
 
 # ─── Crawl runs ───────────────────────────────────────────────────────────────
-async def create_run(trigger: str = "manual") -> int:
+async def create_run(engine: str = "", trigger: str = "manual") -> int:
     cur = await conn().execute(
-        "INSERT INTO crawl_runs (trigger, started_at, status) VALUES (?, ?, 'running')",
-        (trigger, _now()),
+        "INSERT INTO crawl_runs (engine, trigger, started_at, status) VALUES (?, ?, ?, 'running')",
+        (engine, trigger, _now()),
     )
     await conn().commit()
     return cur.lastrowid
@@ -147,6 +163,38 @@ async def get_latest_run() -> Optional[dict]:
     ) as cur:
         row = await cur.fetchone()
     return dict(row) if row else None
+
+
+async def list_runs(limit: int = 20) -> list[dict]:
+    async with conn().execute(
+        "SELECT * FROM crawl_runs ORDER BY id DESC LIMIT ?", (limit,)
+    ) as cur:
+        return [dict(r) for r in await cur.fetchall()]
+
+
+# ─── Engine state (freshness theo engine) ─────────────────────────────────────
+async def get_engine_state(engine: str) -> Optional[dict]:
+    async with conn().execute(
+        "SELECT * FROM engine_state WHERE engine = ?", (engine,)
+    ) as cur:
+        row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def list_engine_state() -> dict[str, dict]:
+    async with conn().execute("SELECT * FROM engine_state") as cur:
+        return {r["engine"]: dict(r) for r in await cur.fetchall()}
+
+
+async def set_engine_state(engine: str, last_run_at: int, last_status: str) -> None:
+    await conn().execute(
+        """INSERT INTO engine_state (engine, last_run_at, last_status)
+           VALUES (?, ?, ?)
+           ON CONFLICT(engine) DO UPDATE SET
+             last_run_at = excluded.last_run_at, last_status = excluded.last_status""",
+        (engine, last_run_at, last_status),
+    )
+    await conn().commit()
 
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
