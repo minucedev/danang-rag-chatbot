@@ -31,3 +31,7 @@ frontend/.next/
 
 # Logs
 *.log
+
+raw_data/
+test.py
+unified_crawler.py

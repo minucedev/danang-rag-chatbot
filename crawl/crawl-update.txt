@@ -1,0 +1,8 @@
+Crawl Entity:
+- Lưu lại ngày crawl gần nhất của mỗi entity vào trong db
+- crawl vài trang đầu của trang web đã dùng để crawl trước đó, nếu chưa có thì thêm vào danh sách crawl, nếu có rồi thì check xem ngày crawl gần nhất có đủ lâu không mới thêm vào danh sách (Nếu mới crawl hôm qua thì khỏi)
+- những entity lâu quá chưa update cũng thêm vào danh sách 
+- phần crawl được mới sẽ thay thế hoàn toàn thông tin của phần đã có trong db
+
+Phần review của entity:
+- phần review của mỗi entity thì crawl theo ngày gần nhất mà entity đó được crawl 
