@@ -127,15 +127,15 @@ async def api_hotels():
     import pandas as pd
     from pathlib import Path
     out = []
-    # 1. Thử đọc Agoda hotels
-    agoda_path = Path(config.DATA_AGODA) / "hotels.csv"
-    if agoda_path.exists():
+    # 1. Thử đọc Traveloka hotels
+    traveloka_path = Path(config.DATA_TRAVELOKA) / "hotels.csv"
+    if traveloka_path.exists():
         try:
-            df = pd.read_csv(agoda_path, encoding="utf-8-sig")
+            df = pd.read_csv(traveloka_path, encoding="utf-8-sig")
             for _, r in df.iterrows():
                 out.append({
                     "name": str(r.get("name", "")).strip(),
-                    "platform": "Agoda",
+                    "platform": "Traveloka",
                     "rating": str(r.get("rating", "")).strip(),
                     "review_count": str(r.get("review_count", "")).strip(),
                     "address": str(r.get("full_address", "") or r.get("address", "")).strip()
@@ -157,24 +157,7 @@ async def api_hotels():
                 })
         except Exception:
             pass
-    
-    # 3. Nếu chưa có file crawl nào, fallback sang raw_data accommodations làm mẫu
-    if not out:
-        fallback_path = Path(__file__).resolve().parent.parent.parent / "raw_data" / "accommodations" / "hotels.csv"
-        if fallback_path.exists():
-            try:
-                df = pd.read_csv(fallback_path, encoding="utf-8-sig")
-                # Lấy tối đa 100 khách sạn làm mẫu
-                for _, r in df.head(100).iterrows():
-                    out.append({
-                        "name": str(r.get("name", "")).strip(),
-                        "platform": "Traveloka (Mẫu)",
-                        "rating": str(r.get("rating", "")).strip(),
-                        "review_count": str(r.get("review_count", "")).strip(),
-                        "address": str(r.get("full_address", "") or r.get("address", "")).strip()
-                    })
-            except Exception:
-                pass
+        
     return out
 
 

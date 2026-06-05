@@ -2,9 +2,9 @@
 
 Port từ qdrant-etl.ipynb (helpers + build_* + ensure/upsert), chỉnh:
 - recreate=False (chỉ tạo collection khi thiếu, KHÔNG xoá → giữ places/dữ liệu cũ);
-- đọc CSV từ crawl/data/{foody,agoda,booking};
+- đọc CSV từ crawl/data/{foody,traveloka,booking};
 - embed bge-m3 (lazy, CPU); Qdrant client sync.
-Phạm vi: restaurants (Foody) + accommodation hotels/rooms/reviews (Agoda+Booking).
+Phạm vi: restaurants (Foody) + accommodation hotels/rooms/reviews (Traveloka+Booking).
 """
 from __future__ import annotations
 import hashlib
@@ -624,8 +624,8 @@ def run_ingest_blocking(log: Callable[[str], None]) -> dict:
         else:
             log("Không có restaurant_detail.csv — bỏ qua nhà hàng.")
 
-        # ── Accommodation (Agoda + Booking) ──
-        dirs = [config.DATA_AGODA, config.DATA_BOOKING]
+        # ── Accommodation (Traveloka + Booking) ──
+        dirs = [config.DATA_TRAVELOKA, config.DATA_BOOKING]
         df_hotels = _concat(dirs, "hotels.csv")
         if not df_hotels.empty:
             img = build_image_summary(_concat(dirs, "images.csv"))

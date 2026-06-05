@@ -62,9 +62,9 @@ SCHEDULE_HOURS = int(os.getenv("CRAWL_SCHEDULE_HOURS", "24"))
 JOB_FRESHNESS_HOURS = int(os.getenv("CRAWL_JOB_FRESHNESS_HOURS", "20"))
 
 # Giới hạn engine khách sạn (orchestrate as-is) — mặc định THẤP để tránh bị chặn
-AGODA_MAX_PAGES = int(os.getenv("CRAWL_AGODA_MAX_PAGES", "3"))
-AGODA_MAX_HOTELS = int(os.getenv("CRAWL_AGODA_MAX_HOTELS", "30"))
-AGODA_REVIEWS = int(os.getenv("CRAWL_AGODA_REVIEWS", "10"))
+TRAVELOKA_MAX_PAGES = int(os.getenv("CRAWL_TRAVELOKA_MAX_PAGES", "3"))
+TRAVELOKA_MAX_HOTELS = int(os.getenv("CRAWL_TRAVELOKA_MAX_HOTELS", "30"))
+TRAVELOKA_REVIEWS = int(os.getenv("CRAWL_TRAVELOKA_REVIEWS", "10"))
 BOOKING_MAX_PAGES = int(os.getenv("CRAWL_BOOKING_MAX_PAGES", "2"))
 BOOKING_MAX_PROPERTIES = int(os.getenv("CRAWL_BOOKING_MAX_PROPERTIES", "30"))
 BOOKING_MIN_REVIEWS = int(os.getenv("CRAWL_BOOKING_MIN_REVIEWS", "10"))
@@ -72,7 +72,7 @@ BOOKING_CITY = os.getenv("CRAWL_BOOKING_CITY", "Da Nang")
 
 # Thư mục output CSV cho từng engine (gitignore'd)
 DATA_FOODY = str(DATA_DIR / "foody")
-DATA_AGODA = str(DATA_DIR / "agoda")
+DATA_TRAVELOKA = str(DATA_DIR / "traveloka")
 DATA_BOOKING = str(DATA_DIR / "booking")
 
 # Server

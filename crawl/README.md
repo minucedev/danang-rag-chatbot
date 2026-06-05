@@ -13,13 +13,13 @@ python crawl/seed.py
 | Key | Nguồn | Công nghệ | File Output & Cơ sở dữ liệu |
 |---|---|---|---|
 | `foody` | Nhà hàng Foody | API discovery + Playwright detail (async) | **Dữ liệu được lưu tiệm tiến (progressive saving)**:<br>1. SQLite table `entities` (cập nhật ngay khi xong mỗi quán)<br>2. `data/foody/restaurant_detail.csv` (chi tiết nhà hàng)<br>3. `data/foody/reviews_output.csv` (reviews thô)<br>4. `data/foody/reviews_cleaned.csv` (reviews đã tiền xử lý: chuẩn hóa văn bản, xử lý slang/viết tắt, tính điểm recency và chuẩn hóa thời gian) |
-| `agoda` | Khách sạn Agoda | Playwright sync | `data/agoda/{hotels,rooms,prices,policies,reviews,images}.csv` |
+| `traveloka` | Khách sạn Traveloka | Playwright sync | `data/traveloka/{hotels,rooms,prices,policies,reviews,images}.csv` |
 | `booking` | Khách sạn Booking.com | Playwright sync | `data/booking/{hotels,rooms,prices,policies,reviews,images}.csv` |
 | `ingest` | **Đẩy CSV → Qdrant** | embed bge-m3 + **upsert** | Upsert trực tiếp dữ liệu từ các file CSV trên lên Qdrant collection tương ứng |
 
 ## Ingest lên Qdrant (nút riêng)
 - Bấm thẻ **"⬆ Đẩy lên Qdrant"** sau khi cào thành công → embed (bge-m3) + **upsert** (theo `stable_uuid`, KHÔNG xoá collection → giữ nguyên `places_danang` + dữ liệu cũ). Idempotent (chạy lại không nhân bản).
-- Phạm vi: nhà hàng (Foody) + khách sạn/phòng/review (Agoda/Booking). KHÔNG đụng places.
+- Phạm vi: nhà hàng (Foody) + khách sạn/phòng/review (Traveloka/Booking). KHÔNG đụng places.
 - Cần `backend/.env` có `QDRANT_URL`/`QDRANT_API_KEY` (cùng Qdrant app chính) + bge-m3 trong `backend/models/.cache` (load offline). KHÔNG vào scheduler/"Chạy tất cả" (chỉ bấm tay).
 
 ## Tính năng
@@ -45,10 +45,10 @@ Mở http://localhost:8100
 | `CRAWL_JOB_FRESHNESS_HOURS` | 20 | Bỏ qua engine vừa chạy < ngần này |
 | `CRAWL_FRESHNESS_HOURS` | 24 | Freshness từng quán Foody |
 | `CRAWL_DISCOVERY_MAX_NEW` | 100 | Cap số quán Foody mỗi lần |
-| `CRAWL_AGODA_MAX_PAGES/HOTELS/REVIEWS` | 3/30/10 | Giới hạn Agoda (thấp = an toàn) |
+| `CRAWL_TRAVELOKA_MAX_PAGES/HOTELS/REVIEWS` | 3/30/10 | Giới hạn Traveloka (thấp = an toàn) |
 | `CRAWL_BOOKING_MAX_PAGES/PROPERTIES/MIN_REVIEWS` | 2/30/10 | Giới hạn Booking |
 | `CRAWL_FOODY_HEADLESS` | true | Bật chế độ không giao diện (headless) cho Foody (vì crawl nhẹ, dựa trên API) |
-| `CRAWL_HOTEL_HEADLESS` | false | Bật chế độ không giao diện (headless) cho Agoda/Booking (mặc định `false` để tránh bị bot detection chặn) |
+| `CRAWL_HOTEL_HEADLESS` | false | Bật chế độ không giao diện (headless) cho Traveloka/Booking (mặc định `false` để tránh bị bot detection chặn) |
 | `CRAWL_SCHEDULE_ENABLED` | true | Bật/tắt scheduler |
 
 ## Cấu trúc thư mục
@@ -61,8 +61,8 @@ crawl/app/
   foody_crawler.py detail crawler Foody (Playwright async)
   review_preprocessor.py tiền xử lý và dọn dẹp review quán ăn
   engines/
-    __init__.py    REGISTRY foody/agoda/booking (mỗi engine async run(ctx))
-    hotel_crawler.py  Agoda + Booking engine (Playwright sync)
+    __init__.py    REGISTRY foody/traveloka/booking (mỗi engine async run(ctx))
+    hotel_crawler.py  Traveloka + Booking engine (Playwright sync)
   static/
     style.css      mã CSS giao diện
   orchestrator.py  chạy engine lần lượt + khóa 1-run + freshness
@@ -72,5 +72,5 @@ crawl/app/
 ```
 
 ## Lưu ý
-- Agoda/Booking chống bot mạnh; headless dễ bị chặn nên `CRAWL_HOTEL_HEADLESS` mặc định là `false`. Nếu muốn chạy ẩn danh hoàn toàn, hãy cấu hình `CRAWL_HOTEL_HEADLESS=true`.
+- Traveloka/Booking chống bot mạnh; headless dễ bị chặn nên `CRAWL_HOTEL_HEADLESS` mặc định là `false`. Nếu muốn chạy ẩn danh hoàn toàn, hãy cấu hình `CRAWL_HOTEL_HEADLESS=true`.
 - Mỗi lúc chỉ chạy **1 engine** để đảm bảo tài nguyên hệ thống (Playwright ngốn tài nguyên trình duyệt lớn).

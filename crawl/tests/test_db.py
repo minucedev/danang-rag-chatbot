@@ -37,10 +37,10 @@ async def test_engine_state_roundtrip(tmp_db):
 
 async def test_create_finish_run(tmp_db):
     db = tmp_db
-    rid = await db.create_run(engine="agoda", trigger="manual")
+    rid = await db.create_run(engine="traveloka", trigger="manual")
     await db.finish_run(rid, "done", 5, 4, 1)
     runs = await db.list_runs()
     assert runs[0]["id"] == rid
-    assert runs[0]["engine"] == "agoda"
+    assert runs[0]["engine"] == "traveloka"
     assert runs[0]["status"] == "done"
     assert (runs[0]["ok"], runs[0]["total"], runs[0]["failed"]) == (4, 5, 1)

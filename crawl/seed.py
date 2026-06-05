@@ -30,7 +30,7 @@ DB_PATH = DATA_DIR / "crawl.db"
 
 # Thư mục đích cho CSV
 DATA_FOODY = DATA_DIR / "foody"
-DATA_AGODA = DATA_DIR / "agoda"
+DATA_TRAVELOKA = DATA_DIR / "traveloka"
 DATA_BOOKING = DATA_DIR / "booking"
 
 LAST_CRAWL_AT_DAYS_AGO = 0
@@ -143,7 +143,7 @@ def seed_database():
     print("\n=== Đang cập nhật trạng thái engine ===")
     engine_last_runs = {
         "foody": last_crawl_time,
-        "agoda": last_crawl_time - 150,
+        "traveloka": last_crawl_time - 150,
         "booking": last_crawl_time - 350,
         "ingest": last_crawl_time
     }
@@ -164,7 +164,7 @@ def seed_database():
     )
     cursor.execute(
         """INSERT INTO crawl_runs (engine, trigger, started_at, finished_at, status, total, ok, failed)
-           VALUES ('agoda', 'manual', ?, ?, 'done', 50, 50, 0)""",
+           VALUES ('traveloka', 'manual', ?, ?, 'done', 50, 50, 0)""",
         (last_crawl_time - 300, last_crawl_time - 150)
     )
     cursor.execute(

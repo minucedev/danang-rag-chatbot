@@ -1,4 +1,4 @@
-"""Registry 3 engine: foody (nhà hàng) + agoda/booking (khách sạn).
+"""Registry 3 engine: foody (nhà hàng) + traveloka/booking (khách sạn).
 
 Mỗi engine: async run(ctx) -> dict {total, ok, failed}. Engine khách sạn là sync Playwright
 (crawl1 (2).py) → chạy qua run_in_executor + cầu nối logging sang log_bus (orchestrate as-is).
@@ -188,14 +188,14 @@ class _BusLogHandler(logging.Handler):
             pass
 
 
-def _make_agoda():
-    from app.engines.hotel_crawler import AgodaCrawlerEngine
-    return AgodaCrawlerEngine(
+def _make_traveloka():
+    from app.engines.hotel_crawler import TravelokaCrawlerEngine
+    return TravelokaCrawlerEngine(
         headless=config.HOTEL_HEADLESS,
-        max_pages=config.AGODA_MAX_PAGES,
-        max_hotels=config.AGODA_MAX_HOTELS,
-        reviews_per_hotel=config.AGODA_REVIEWS,
-        data_dir=Path(config.DATA_AGODA),
+        max_pages=config.TRAVELOKA_MAX_PAGES,
+        max_hotels=config.TRAVELOKA_MAX_HOTELS,
+        min_reviews=config.TRAVELOKA_REVIEWS,
+        data_dir=Path(config.DATA_TRAVELOKA),
     )
 
 
@@ -253,7 +253,7 @@ def _ingest_runner():
 
 ENGINES: dict[str, dict] = {
     "foody": {"label": "Foody — Nhà hàng + Reviews", "kind": "crawl", "run": _run_foody},
-    "agoda": {"label": "Agoda — Khách sạn", "kind": "crawl", "run": _hotel_runner(_make_agoda, config.DATA_AGODA)},
+    "traveloka": {"label": "Traveloka — Khách sạn", "kind": "crawl", "run": _hotel_runner(_make_traveloka, config.DATA_TRAVELOKA)},
     "booking": {"label": "Booking — Khách sạn", "kind": "crawl", "run": _hotel_runner(_make_booking, config.DATA_BOOKING)},
     "ingest": {"label": "⬆ Đẩy lên Qdrant", "kind": "ingest", "run": _ingest_runner()},
 }
