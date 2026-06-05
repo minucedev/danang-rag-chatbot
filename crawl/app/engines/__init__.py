@@ -15,7 +15,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-from app import config, db, discover, foody_crawler, foody_review_crawler, ingest
+from app import config, db, discover, foody_crawler, foody_review_crawler, ingest, review_preprocessor
 from app.logbus import log_bus
 
 _VN_DISTRICTS = {
@@ -96,7 +96,23 @@ async def _run_foody(ctx) -> dict:
         return {"total": 0, "ok": 0, "failed": 0}
 
     counters = {"ok": 0, "failed": 0}
+    reviews_lock = asyncio.Lock()
     sem = asyncio.Semaphore(config.MAX_WORKERS)
+
+    # ─── Khởi tạo các file CSV nếu cào từ đầu (Fresh start vs Resume) ───
+    all_entities = await db.list_entities()
+    is_fresh_start = all(e.get("last_crawl_at") is None for e in all_entities)
+    if is_fresh_start:
+        await ctx.log("info", "Lượt cào mới: Xóa các file CSV cũ để bắt đầu ghi mới.")
+        for fname in ["restaurant_detail.csv", "reviews_output.csv", "reviews_cleaned.csv"]:
+            p = Path(config.DATA_FOODY) / fname
+            if p.exists():
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+    else:
+        await ctx.log("info", "Resume: Sẽ append thêm vào các file CSV hiện có.")
 
     async def _one(browser, ent):
         url = ent["url"]
@@ -106,7 +122,16 @@ async def _run_foody(ctx) -> dict:
             try:
                 await db.set_entity_status(url, "crawling")
                 await ctx.log("info", f"Đang crawl: {url}")
-                data = await foody_crawler.crawl_detail(page, url)
+
+                # Tính review_limit từ review_count hiện có (discovery API)
+                try:
+                    rc_est = int(float(ent.get("review_count") or 0))
+                except (ValueError, TypeError):
+                    rc_est = 0
+                rv_limit = foody_review_crawler.review_limit(rc_est) if rc_est > 0 else 0
+
+                data, reviews = await foody_crawler.crawl_detail_with_reviews(page, url, rv_limit)
+
                 name = data.get("Name", "")
                 district = _extract_district(data.get("Address", "")) or ent.get("district", "")
                 try:
@@ -116,8 +141,18 @@ async def _run_foody(ctx) -> dict:
                 await db.replace_entity_data(
                     url, name, district, json.dumps(data, ensure_ascii=False), rc
                 )
+                if reviews:
+                    async with reviews_lock:
+                        review_preprocessor.append_reviews_to_files(reviews, config.DATA_FOODY)
+                    await ctx.log("info", f"OK: {name or url} — {len(reviews)} review")
+                else:
+                    await ctx.log("info", f"OK: {name or url} (0 review)")
+
+                # Ghi lại file restaurant_detail.csv đồng bộ tiến độ
+                async with reviews_lock:
+                    _write_foody_csv(await db.list_entities())
+
                 counters["ok"] += 1
-                await ctx.log("info", f"OK: {name or url}")
             except Exception as exc:
                 counters["failed"] += 1
                 await db.set_entity_status(url, "error", f"{type(exc).__name__}: {exc}")
@@ -127,72 +162,15 @@ async def _run_foody(ctx) -> dict:
                 await asyncio.sleep(random.uniform(config.DELAY_MIN, config.DELAY_MAX))
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=config.HEADLESS)
+        browser = await p.chromium.launch(headless=config.FOODY_HEADLESS)
         await asyncio.gather(*[_one(browser, e) for e in targets])
         await browser.close()
 
-    _write_foody_csv(await db.list_entities())
+    await ctx.log("info", "Đã hoàn thành lượt crawl chi tiết Foody.")
     return {"total": len(targets), "ok": counters["ok"], "failed": counters["failed"]}
 
 
-# ─── Foody review engine (async: lặp entity đã crawl → review Playwright → CSV) ─
-def _write_reviews_csv(rows: list[dict]) -> None:
-    if not rows:
-        return
-    Path(config.DATA_FOODY).mkdir(parents=True, exist_ok=True)
-    path = Path(config.DATA_FOODY) / "reviews_output.csv"
-    cols = ["url", "username", "time", "score", "content"]
-    with open(path, "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
 
-
-async def _run_foody_reviews(ctx) -> dict:
-    targets = [
-        e for e in await db.list_entities()
-        if e.get("status") == "done" and e.get("url") and (e.get("review_count") or 0) > 0
-    ]
-    await ctx.log("info", f"{len(targets)} quán (đã crawl chi tiết) cần crawl review.")
-    if not targets:
-        return {"total": 0, "ok": 0, "failed": 0}
-
-    counters = {"ok": 0, "failed": 0}
-    rows: list[dict] = []
-    rows_lock = asyncio.Lock()
-    sem = asyncio.Semaphore(config.MAX_WORKERS)
-
-    async def _one(browser, ent):
-        url = ent["url"]
-        limit = foody_review_crawler.review_limit(int(ent.get("review_count") or 0))
-        async with sem:
-            cxt = await foody_crawler.new_context(browser)
-            page = await cxt.new_page()
-            try:
-                reviews = await foody_review_crawler.crawl_reviews(page, url, limit)
-                async with rows_lock:
-                    rows.extend(reviews)
-                counters["ok"] += 1
-                if reviews:
-                    await ctx.log("info", f"OK: {ent.get('name') or url} — {len(reviews)} review")
-                else:
-                    # review_count>0 mà trích xuất 0 → dấu hiệu bị chặn / đổi layout, không phải "hết review"
-                    await ctx.log("warning", f"0 review (có thể bị chặn/đổi layout): {ent.get('name') or url}")
-            except Exception as exc:
-                counters["failed"] += 1
-                await ctx.log("error", f"FAIL {url} — {type(exc).__name__}: {exc}")
-            finally:
-                await cxt.close()
-                await asyncio.sleep(random.uniform(config.DELAY_MIN, config.DELAY_MAX))
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=config.HEADLESS)
-        await asyncio.gather(*[_one(browser, e) for e in targets])
-        await browser.close()
-
-    _write_reviews_csv(rows)
-    await ctx.log("info", f"Đã ghi {len(rows)} review vào reviews_output.csv")
-    return {"total": len(targets), "ok": counters["ok"], "failed": counters["failed"]}
 
 
 # ─── Hotel engines (sync Playwright crawl1(2).py → chạy qua thread) ───────────
@@ -213,7 +191,7 @@ class _BusLogHandler(logging.Handler):
 def _make_agoda():
     from app.engines.hotel_crawler import AgodaCrawlerEngine
     return AgodaCrawlerEngine(
-        headless=config.HEADLESS,
+        headless=config.HOTEL_HEADLESS,
         max_pages=config.AGODA_MAX_PAGES,
         max_hotels=config.AGODA_MAX_HOTELS,
         reviews_per_hotel=config.AGODA_REVIEWS,
@@ -224,7 +202,7 @@ def _make_agoda():
 def _make_booking():
     from app.engines.hotel_crawler import BookingCrawlerEngine
     return BookingCrawlerEngine(
-        headless=config.HEADLESS,
+        headless=config.HOTEL_HEADLESS,
         max_pages=config.BOOKING_MAX_PAGES,
         max_properties=config.BOOKING_MAX_PROPERTIES,
         min_reviews=config.BOOKING_MIN_REVIEWS,
@@ -274,8 +252,7 @@ def _ingest_runner():
 
 
 ENGINES: dict[str, dict] = {
-    "foody": {"label": "Foody — Nhà hàng", "kind": "crawl", "run": _run_foody},
-    "foody_reviews": {"label": "Foody — Reviews", "kind": "crawl", "run": _run_foody_reviews},
+    "foody": {"label": "Foody — Nhà hàng + Reviews", "kind": "crawl", "run": _run_foody},
     "agoda": {"label": "Agoda — Khách sạn", "kind": "crawl", "run": _hotel_runner(_make_agoda, config.DATA_AGODA)},
     "booking": {"label": "Booking — Khách sạn", "kind": "crawl", "run": _hotel_runner(_make_booking, config.DATA_BOOKING)},
     "ingest": {"label": "⬆ Đẩy lên Qdrant", "kind": "ingest", "run": _ingest_runner()},

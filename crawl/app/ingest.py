@@ -517,20 +517,35 @@ def ensure_payload_indexes(client, name):
                 print(f"[ingest] index {name}.{field} lỗi: {type(exc).__name__}: {exc}")
 
 
-def upsert_docs(client, name, embedder, docs, log, batch_size=64):
+def upsert_docs(client, name, embedder, docs, log, batch_size=64, encode_batch=32):
+    """Upsert docs vào Qdrant. Khi OOM thì giảm encode_batch_size rồi retry. Dọn GC mỗi batch."""
+    import gc
     if not docs:
         return 0
     total = 0
     for i in range(0, len(docs), batch_size):
         batch = docs[i:i + batch_size]
-        vectors = embedder.encode([d["text"] for d in batch], normalize_embeddings=True,
-                                  show_progress_bar=False, batch_size=min(32, len(batch)))
+        texts = [d["text"] for d in batch]
+        try:
+            vectors = embedder.encode(texts, normalize_embeddings=True,
+                                      show_progress_bar=False, batch_size=min(encode_batch, len(texts)))
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower() and encode_batch > 8:
+                smaller = max(8, encode_batch // 2)
+                log(f"  ⚠ OOM khi encode {name} — retry với encode_batch={smaller}")
+                return total + upsert_docs(
+                    client, name, embedder, docs[i:], log,
+                    batch_size=batch_size, encode_batch=smaller,
+                )
+            raise
         points = [PointStruct(id=d["id"], vector=v.tolist(),
                               payload={**d["payload"], "content": d["text"]})
                   for d, v in zip(batch, vectors)]
         client.upsert(collection_name=name, points=points)
         total += len(points)
         log(f"  {name}: {total}/{len(docs)}")
+        del texts, vectors, points, batch
+        gc.collect()
     return total
 
 
@@ -588,9 +603,13 @@ def run_ingest_blocking(log: Callable[[str], None]) -> dict:
                 d["payload"]["source_url"]: d["id"]
                 for d in docs if d["payload"].get("source_url")
             }
-            df_rv = _read_csv(Path(config.DATA_FOODY) / "reviews_output.csv")
+            # Ưu tiên reviews_cleaned.csv (đã tiền xử lý), fallback reviews_output.csv
+            _rv_cleaned = Path(config.DATA_FOODY) / "reviews_cleaned.csv"
+            _rv_raw = Path(config.DATA_FOODY) / "reviews_output.csv"
+            _rv_path = _rv_cleaned if _rv_cleaned.exists() else _rv_raw
+            df_rv = _read_csv(_rv_path)
             if df_rv.empty:
-                log("Không có reviews_output.csv — bỏ qua review nhà hàng.")
+                log("Không có reviews CSV — bỏ qua review nhà hàng.")
             elif not url_to_entity:
                 # CSV có dữ liệu nhưng không nhà hàng nào có URL để liên kết → log đúng nguyên nhân
                 log(f"Có {len(df_rv)} dòng review nhưng không nhà hàng nào có URL để liên kết — bỏ qua.")

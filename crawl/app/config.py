@@ -42,6 +42,9 @@ DELAY_MIN = float(os.getenv("CRAWL_DELAY_MIN", "0.8"))
 DELAY_MAX = float(os.getenv("CRAWL_DELAY_MAX", "2.5"))
 GOTO_TIMEOUT = int(os.getenv("CRAWL_GOTO_TIMEOUT", "60000"))      # ms
 HEADLESS = os.getenv("CRAWL_HEADLESS", "true").lower() in ("1", "true", "yes")
+# Foody bật headless (nhẹ, API-based), hotel tắt headless (JS-heavy, cần render)
+FOODY_HEADLESS = os.getenv("CRAWL_FOODY_HEADLESS", "true").lower() in ("1", "true", "yes")
+HOTEL_HEADLESS = os.getenv("CRAWL_HOTEL_HEADLESS", "false").lower() in ("1", "true", "yes")
 REVIEW_CLICK_WAIT_MS = int(os.getenv("CRAWL_REVIEW_CLICK_WAIT_MS", "1200"))  # chờ sau mỗi click "Xem thêm bình luận"
 
 # Auto-discovery (Foody listing API) — tự tìm quán Đà Nẵng, không cần nhập URL tay

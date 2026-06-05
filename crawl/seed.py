@@ -58,6 +58,9 @@ def seed_database():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
+    now = int(time.time())
+    last_crawl_time = now - (LAST_CRAWL_AT_DAYS_AGO * 24 * 3600)
+    
     # Chạy schema.sql để tạo cấu trúc bảng nếu chưa có
     schema_path = BASE_DIR / "app" / "schema.sql"
     if schema_path.exists():
@@ -73,8 +76,6 @@ def seed_database():
     rest_csv = RAW_DATA_DIR / "restaurant" / "restaurant_info.csv"
     if rest_csv.exists():
         print("\n=== Đang seed nhà hàng Foody vào SQLite ===")
-        now = int(time.time())
-        last_crawl_time = now - (LAST_CRAWL_AT_DAYS_AGO * 24 * 3600)
         print(f"Thời gian cào cuối cùng được cấu hình là: {LAST_CRAWL_AT_DAYS_AGO} ngày trước.")
         inserted = 0
         
@@ -140,32 +141,36 @@ def seed_database():
 
     # 2. Cấu hình trạng thái các engine trong bảng engine_state về "done"
     print("\n=== Đang cập nhật trạng thái engine ===")
-    now = int(time.time())
-    engines = ["foody", "agoda", "booking", "ingest"]
-    for eng in engines:
+    engine_last_runs = {
+        "foody": last_crawl_time,
+        "agoda": last_crawl_time - 150,
+        "booking": last_crawl_time - 350,
+        "ingest": last_crawl_time
+    }
+    for eng, run_time in engine_last_runs.items():
         cursor.execute(
             """INSERT INTO engine_state (engine, last_run_at, last_status)
                VALUES (?, ?, 'done')
                ON CONFLICT(engine) DO UPDATE SET
                  last_run_at = excluded.last_run_at, last_status = 'done'""",
-            (eng, now)
+            (eng, run_time)
         )
     
     # Tạo lịch sử chạy giả lập để hiển thị đẹp trên UI
     cursor.execute(
         """INSERT INTO crawl_runs (engine, trigger, started_at, finished_at, status, total, ok, failed)
            VALUES ('foody', 'manual', ?, ?, 'done', 577, 577, 0)""",
-        (now - 120, now)
+        (last_crawl_time - 120, last_crawl_time)
     )
     cursor.execute(
         """INSERT INTO crawl_runs (engine, trigger, started_at, finished_at, status, total, ok, failed)
            VALUES ('agoda', 'manual', ?, ?, 'done', 50, 50, 0)""",
-        (now - 300, now - 150)
+        (last_crawl_time - 300, last_crawl_time - 150)
     )
     cursor.execute(
         """INSERT INTO crawl_runs (engine, trigger, started_at, finished_at, status, total, ok, failed)
            VALUES ('booking', 'manual', ?, ?, 'done', 50, 50, 0)""",
-        (now - 450, now - 350)
+        (last_crawl_time - 450, last_crawl_time - 350)
     )
     
     conn.commit()

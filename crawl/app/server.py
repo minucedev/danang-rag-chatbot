@@ -21,6 +21,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+from fastapi.staticfiles import StaticFiles
+
 from app import config, db, orchestrator
 from app.engines import ENGINES, CRAWL_KEYS
 from app.logbus import log_bus
@@ -55,6 +57,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Crawl Admin", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -117,6 +120,62 @@ async def api_runs():
 @app.get("/api/entities")
 async def api_entities():
     return await db.list_entities()
+
+
+@app.get("/api/hotels")
+async def api_hotels():
+    import pandas as pd
+    from pathlib import Path
+    out = []
+    # 1. Thử đọc Agoda hotels
+    agoda_path = Path(config.DATA_AGODA) / "hotels.csv"
+    if agoda_path.exists():
+        try:
+            df = pd.read_csv(agoda_path, encoding="utf-8-sig")
+            for _, r in df.iterrows():
+                out.append({
+                    "name": str(r.get("name", "")).strip(),
+                    "platform": "Agoda",
+                    "rating": str(r.get("rating", "")).strip(),
+                    "review_count": str(r.get("review_count", "")).strip(),
+                    "address": str(r.get("full_address", "") or r.get("address", "")).strip()
+                })
+        except Exception:
+            pass
+    # 2. Thử đọc Booking hotels
+    booking_path = Path(config.DATA_BOOKING) / "hotels.csv"
+    if booking_path.exists():
+        try:
+            df = pd.read_csv(booking_path, encoding="utf-8-sig")
+            for _, r in df.iterrows():
+                out.append({
+                    "name": str(r.get("name", "")).strip(),
+                    "platform": "Booking",
+                    "rating": str(r.get("rating", "")).strip(),
+                    "review_count": str(r.get("review_count", "")).strip(),
+                    "address": str(r.get("full_address", "") or r.get("address", "")).strip()
+                })
+        except Exception:
+            pass
+    
+    # 3. Nếu chưa có file crawl nào, fallback sang raw_data accommodations làm mẫu
+    if not out:
+        fallback_path = Path(__file__).resolve().parent.parent.parent / "raw_data" / "accommodations" / "hotels.csv"
+        if fallback_path.exists():
+            try:
+                df = pd.read_csv(fallback_path, encoding="utf-8-sig")
+                # Lấy tối đa 100 khách sạn làm mẫu
+                for _, r in df.head(100).iterrows():
+                    out.append({
+                        "name": str(r.get("name", "")).strip(),
+                        "platform": "Traveloka (Mẫu)",
+                        "rating": str(r.get("rating", "")).strip(),
+                        "review_count": str(r.get("review_count", "")).strip(),
+                        "address": str(r.get("full_address", "") or r.get("address", "")).strip()
+                    })
+            except Exception:
+                pass
+    return out
 
 
 # ─── Sources (URL Foody thêm tay, tùy chọn) ──────────────────────────────────

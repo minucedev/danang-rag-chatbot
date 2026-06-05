@@ -100,8 +100,8 @@ async def new_context(browser: Browser):
     return ctx
 
 
-async def crawl_detail(page: Page, url: str) -> dict:
-    """Crawl 1 trang chi tiết Foody → dict field. Raise nếu goto/evaluate lỗi."""
+async def _goto_and_wait(page: Page, url: str) -> None:
+    """Goto + chờ header/score — dùng chung cho crawl_detail và crawl_detail_with_reviews."""
     await page.goto(url, timeout=config.GOTO_TIMEOUT, wait_until="domcontentloaded")
     try:
         await page.wait_for_selector(".micro-header", timeout=10_000)
@@ -114,8 +114,9 @@ async def crawl_detail(page: Page, url: str) -> dict:
     except Exception:
         pass
 
-    raw = await page.evaluate(EXTRACT_JS)
-    # Trích xuất rỗng toàn bộ (DOM Foody đổi / bị chặn) → coi là LỖI thay vì lưu bản ghi trống.
+
+def _build_detail(raw: dict, url: str) -> dict:
+    """Chuyển raw JS object thành dict chi tiết nhà hàng."""
     if not raw.get("name"):
         raise RuntimeError("Trích xuất rỗng (tên trống — DOM Foody đổi hoặc bị chặn?)")
 
@@ -147,3 +148,65 @@ async def crawl_detail(page: Page, url: str) -> dict:
         "Price max": price_max,
         "URL": url,
     }
+
+
+async def crawl_detail(page: Page, url: str) -> dict:
+    """Crawl 1 trang chi tiết Foody → dict field. Raise nếu goto/evaluate lỗi."""
+    await _goto_and_wait(page, url)
+    raw = await page.evaluate(EXTRACT_JS)
+    return _build_detail(raw, url)
+
+
+async def crawl_detail_with_reviews(page: Page, url: str, review_limit: int) -> tuple[dict, list[dict]]:
+    """Crawl chi tiết + review trên CÙNG 1 lần goto (không cần truy cập trang 2 lần).
+
+    Trả (detail_dict, reviews_list). reviews_list có thể rỗng nếu review_limit<=0
+    hoặc không load được review.
+    """
+    from app import foody_review_crawler
+
+    await _goto_and_wait(page, url)
+    raw = await page.evaluate(EXTRACT_JS)
+    detail = _build_detail(raw, url)
+
+    # ── Crawl review trên cùng page (đã ở trang chi tiết) ──
+    reviews: list[dict] = []
+    if review_limit > 0:
+        try:
+            await foody_review_crawler.load_reviews(page, url, review_limit)
+
+            lis = page.locator("li.review-item")
+            total = min(await lis.count(), review_limit)
+
+            for i in range(total):
+                li = lis.nth(i)
+
+                async def safe(sel: str, _li=li) -> str:
+                    try:
+                        el = _li.locator(sel)
+                        return (await el.inner_text()).strip() if await el.count() > 0 else ""
+                    except Exception:
+                        return ""
+
+                username = await safe(".ru-username")
+                time_text = await safe("div.ru-stats > span")
+                score = foody_review_crawler.extract_score(await safe(".review-points"))
+
+                content = ""
+                for sel in ["div.review-des > div", "div.review-des", ".rd-des"]:
+                    txt = await safe(sel)
+                    if txt and len(txt) > 10:
+                        content = foody_review_crawler.clean_content(txt)
+                        break
+
+                reviews.append({
+                    "url": url,
+                    "username": username,
+                    "time": time_text,
+                    "score": score,
+                    "content": content,
+                })
+        except Exception:
+            pass  # review lỗi không ảnh hưởng detail
+
+    return detail, reviews
