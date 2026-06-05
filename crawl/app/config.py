@@ -33,7 +33,7 @@ COLLECTION_ACCOMMODATION_REVIEWS = "accommodation_reviews_danang"
 COLLECTION_RESTAURANT_REVIEWS = "restaurant_reviews_danang"
 
 # Logic độ "cũ" theo crawl-update.txt
-FRESHNESS_HOURS = int(os.getenv("CRAWL_FRESHNESS_HOURS", "24"))   # mới crawl < ngần này → bỏ qua
+FRESHNESS_HOURS = int(os.getenv("CRAWL_FRESHNESS_HOURS", "48"))   # mới crawl < ngần này → bỏ qua
 STALE_HOURS = int(os.getenv("CRAWL_STALE_HOURS", "720"))          # quá cũ (mặc định 30 ngày) → ép crawl lại
 
 # Playwright
@@ -42,9 +42,10 @@ DELAY_MIN = float(os.getenv("CRAWL_DELAY_MIN", "0.8"))
 DELAY_MAX = float(os.getenv("CRAWL_DELAY_MAX", "2.5"))
 GOTO_TIMEOUT = int(os.getenv("CRAWL_GOTO_TIMEOUT", "60000"))      # ms
 HEADLESS = os.getenv("CRAWL_HEADLESS", "true").lower() in ("1", "true", "yes")
-# Foody bật headless (nhẹ, API-based), hotel tắt headless (JS-heavy, cần render)
+# Foody bật headless (nhẹ, API-based), traveloka tắt headless, booking bật headless
 FOODY_HEADLESS = os.getenv("CRAWL_FOODY_HEADLESS", "true").lower() in ("1", "true", "yes")
-HOTEL_HEADLESS = os.getenv("CRAWL_HOTEL_HEADLESS", "false").lower() in ("1", "true", "yes")
+TRAVELOKA_HEADLESS = os.getenv("CRAWL_TRAVELOKA_HEADLESS", "false").lower() in ("1", "true", "yes")
+BOOKING_HEADLESS = os.getenv("CRAWL_BOOKING_HEADLESS", "true").lower() in ("1", "true", "yes")
 REVIEW_CLICK_WAIT_MS = int(os.getenv("CRAWL_REVIEW_CLICK_WAIT_MS", "1200"))  # chờ sau mỗi click "Xem thêm bình luận"
 
 # Auto-discovery (Foody listing API) — tự tìm quán Đà Nẵng, không cần nhập URL tay

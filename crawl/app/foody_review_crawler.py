@@ -75,8 +75,17 @@ async def load_reviews(page: Page, url: str, limit: int, max_clicks: int = 60) -
             return
 
 
-async def crawl_reviews(page: Page, url: str, limit: int) -> list[dict]:
+async def crawl_reviews(page: Page, url: str, limit: int, last_crawl_at: Optional[int] = None) -> list[dict]:
     """Goto trang quán → load + trích xuất tối đa `limit` review. Trả list dict."""
+    from datetime import datetime
+    
+    last_crawl_dt = None
+    if last_crawl_at:
+        try:
+            last_crawl_dt = datetime.fromtimestamp(last_crawl_at)
+        except Exception:
+            pass
+
     await page.goto(url, timeout=config.GOTO_TIMEOUT, wait_until="domcontentloaded")
     try:
         await page.wait_for_selector(".microsite-reviews-box", timeout=10_000)
@@ -101,6 +110,13 @@ async def crawl_reviews(page: Page, url: str, limit: int) -> list[dict]:
 
         username = await safe(".ru-username")
         time_text = await safe("div.ru-stats > span")
+
+        if last_crawl_dt:
+            from app.review_preprocessor import parse_time
+            parsed_time = parse_time(time_text)
+            if parsed_time and parsed_time < last_crawl_dt:
+                continue
+
         score = extract_score(await safe(".review-points"))
 
         content = ""

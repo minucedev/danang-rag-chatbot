@@ -86,12 +86,23 @@ async def _run_foody(ctx) -> dict:
     await ctx.log("info", f"Discovery: {len(found)} quán, {new} mới thêm vào hàng đợi.")
 
     now = int(time.time())
-    targets = [
-        e for e in await db.list_entities()
-        if e.get("last_crawl_at") is None
-        or now - e["last_crawl_at"] >= config.FRESHNESS_HOURS * 3600
-    ]
-    await ctx.log("info", f"{len(targets)} quán cần crawl chi tiết (bỏ qua quán mới crawl gần đây).")
+    all_ents = await db.list_entities()
+    targets = []
+    discovered_urls = {it["url"] for it in found}
+    
+    for e in all_ents:
+        url = e["url"]
+        last_crawl = e.get("last_crawl_at")
+        if last_crawl is None or (now - last_crawl) >= config.STALE_HOURS * 3600:
+            targets.append(e)
+        elif url in discovered_urls and (now - last_crawl) >= config.FRESHNESS_HOURS * 3600:
+            targets.append(e)
+            
+    await ctx.log(
+        "info",
+        f"{len(targets)} quán được đưa vào queue crawl chi tiết "
+        f"(gồm các quán bị stale > {config.STALE_HOURS}h hoặc các quán quét từ list > {config.FRESHNESS_HOURS}h)."
+    )
     if not targets:
         return {"total": 0, "ok": 0, "failed": 0}
 
@@ -130,7 +141,9 @@ async def _run_foody(ctx) -> dict:
                     rc_est = 0
                 rv_limit = foody_review_crawler.review_limit(rc_est) if rc_est > 0 else 0
 
-                data, reviews = await foody_crawler.crawl_detail_with_reviews(page, url, rv_limit)
+                data, reviews = await foody_crawler.crawl_detail_with_reviews(
+                    page, url, rv_limit, last_crawl_at=ent.get("last_crawl_at")
+                )
 
                 name = data.get("Name", "")
                 district = _extract_district(data.get("Address", "")) or ent.get("district", "")
@@ -191,7 +204,7 @@ class _BusLogHandler(logging.Handler):
 def _make_traveloka():
     from app.engines.hotel_crawler import TravelokaCrawlerEngine
     return TravelokaCrawlerEngine(
-        headless=config.HOTEL_HEADLESS,
+        headless=config.TRAVELOKA_HEADLESS,
         max_pages=config.TRAVELOKA_MAX_PAGES,
         max_hotels=config.TRAVELOKA_MAX_HOTELS,
         min_reviews=config.TRAVELOKA_REVIEWS,
@@ -202,7 +215,7 @@ def _make_traveloka():
 def _make_booking():
     from app.engines.hotel_crawler import BookingCrawlerEngine
     return BookingCrawlerEngine(
-        headless=config.HOTEL_HEADLESS,
+        headless=config.BOOKING_HEADLESS,
         max_pages=config.BOOKING_MAX_PAGES,
         max_properties=config.BOOKING_MAX_PROPERTIES,
         min_reviews=config.BOOKING_MIN_REVIEWS,
@@ -211,9 +224,29 @@ def _make_booking():
     )
 
 
-def _hotel_runner(make_engine, data_dir: str):
+def _hotel_runner(make_engine, data_dir: str, engine_key: str):
     async def _run(ctx) -> dict:
         Path(data_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Lấy thời điểm cào gần nhất của engine này từ SQLite DB
+        state = await db.get_engine_state(engine_key)
+        last_run_at = state.get("last_run_at") if state else None
+        
+        # Lọc các hotel URL bị stale trong DB để đưa vào queue cào (target_urls)
+        stale_urls = []
+        now = int(time.time())
+        all_ents = await db.list_entities()
+        for e in all_ents:
+            url = e["url"]
+            is_match = (engine_key == "traveloka" and "traveloka.com" in url) or \
+                       (engine_key == "booking" and "booking.com" in url)
+            if is_match:
+                last_crawl = e.get("last_crawl_at")
+                if last_crawl is None or (now - last_crawl) >= config.STALE_HOURS * 3600:
+                    stale_urls.append(url)
+                    
+        await ctx.log("info", f"Tìm thấy {len(stale_urls)} khách sạn đã đến hạn hoặc chưa cào từ DB cần cào lại.")
+        
         loop = asyncio.get_running_loop()
         handler = _BusLogHandler(loop)
         handler.setLevel(logging.INFO)
@@ -222,9 +255,43 @@ def _hotel_runner(make_engine, data_dir: str):
         old_level = root.level
         root.setLevel(logging.INFO)  # root mặc định WARNING (stdlib) → hạ INFO để bắt log INFO engine sync
         root.addHandler(handler)
+        
+        # Callback check freshness của từng hotel URL trong DB entities (chỉ skip nếu mới cào trong vòng FRESHNESS_HOURS)
+        def check_freshness(url: str) -> bool:
+            coro = db.get_entity_by_url(url)
+            ent = asyncio.run_coroutine_threadsafe(coro, loop).result()
+            if not ent:
+                return True
+            last_crawl = ent.get("last_crawl_at")
+            if last_crawl is None:
+                return True
+            
+            return (int(time.time()) - last_crawl) >= config.FRESHNESS_HOURS * 3600
+
+        # Callback lưu thông tin hotel vào DB entities sau khi crawl xong
+        def save_entity(url: str, name: str, data_json: str, review_count: int, address: str = ""):
+            entity_id = hashlib.sha1(url.encode("utf-8")).hexdigest()
+            district = _extract_district(address)
+            # Tạo entity rỗng nếu chưa có
+            asyncio.run_coroutine_threadsafe(
+                db.ensure_entity(entity_id, url, None), loop
+            ).result()
+            # Ghi đè dữ liệu mới cào
+            asyncio.run_coroutine_threadsafe(
+                db.replace_entity_data(url, name, district, data_json, review_count), loop
+            ).result()
+
+        def _execute_crawl():
+            engine = make_engine()
+            engine.last_crawl_at = last_run_at
+            engine.check_freshness_callback = check_freshness
+            engine.save_entity_callback = save_entity
+            engine.target_urls = stale_urls
+            engine.run()
+
         try:
-            await ctx.log("info", "Khởi chạy engine khách sạn (Playwright sync trong thread)…")
-            await loop.run_in_executor(None, lambda: make_engine().run())
+            await ctx.log("info", f"Khởi chạy engine {engine_key} (Playwright sync trong thread, last_crawl={last_run_at})…")
+            await loop.run_in_executor(None, _execute_crawl)
         finally:
             root.removeHandler(handler)
             root.setLevel(old_level)
@@ -253,8 +320,8 @@ def _ingest_runner():
 
 ENGINES: dict[str, dict] = {
     "foody": {"label": "Foody — Nhà hàng + Reviews", "kind": "crawl", "run": _run_foody},
-    "traveloka": {"label": "Traveloka — Khách sạn", "kind": "crawl", "run": _hotel_runner(_make_traveloka, config.DATA_TRAVELOKA)},
-    "booking": {"label": "Booking — Khách sạn", "kind": "crawl", "run": _hotel_runner(_make_booking, config.DATA_BOOKING)},
+    "traveloka": {"label": "Traveloka — Khách sạn", "kind": "crawl", "run": _hotel_runner(_make_traveloka, config.DATA_TRAVELOKA, "traveloka")},
+    "booking": {"label": "Booking — Khách sạn", "kind": "crawl", "run": _hotel_runner(_make_booking, config.DATA_BOOKING, "booking")},
     "ingest": {"label": "⬆ Đẩy lên Qdrant", "kind": "ingest", "run": _ingest_runner()},
 }
 

@@ -129,7 +129,8 @@
 
     async function loadEntities() {
       const rows = await (await fetch("/api/entities")).json();
-      document.getElementById("entities-body").innerHTML = rows.slice(0, 200).map(e => `
+      const foodyRows = rows.filter(e => !e.url.includes("booking.com") && !e.url.includes("traveloka.com"));
+      document.getElementById("entities-body").innerHTML = foodyRows.slice(0, 200).map(e => `
     <tr>
       <td>${e.name || "<span style='color:var(--text2)'>(chưa có)</span>"}</td>
       <td>${e.district || ""}</td><td class="${stClass(e.status)}">${e.status}</td>

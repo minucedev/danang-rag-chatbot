@@ -104,6 +104,86 @@ def strip_html_tags(text: Optional[str], default: str = "") -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned if cleaned else default
 
+def parse_review_date_to_obj(date_str: str) -> Optional[datetime.date]:
+    if not date_str or date_str == "N/A":
+        return None
+    raw = date_str.lower().strip()
+    
+    # 1. ISO format: YYYY-MM-DD
+    match_iso = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", raw)
+    if match_iso:
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+            
+    # 2. Clean prefix
+    raw = re.sub(r"^(ngày đánh giá|reviewed|on|ngày|ngày đăng|reviewed on)\b\s*:?", "", raw).strip()
+    
+    # 3. Vietnamese format: "15 tháng 6 năm 2024" or "15 tháng 06, 2024"
+    match_vi = re.search(r"(\d{1,2})\s+tháng\s+(\d{1,2})(?:\s*,\s*|\s+năm\s+)(\d{4})", raw)
+    if match_vi:
+        day, month, year = int(match_vi.group(1)), int(match_vi.group(2)), int(match_vi.group(3))
+        try:
+            return datetime(year, month, day).date()
+        except ValueError:
+            pass
+            
+    # 4. English format: "15 June 2024" or "June 15, 2024"
+    months_en = {
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+        "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+        "january": 1, "february": 2, "march": 3, "april": 4, "june": 6,
+        "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
+    }
+    
+    match_en1 = re.search(r"(\d{1,2})\s+([a-z]{3,9})\s+(\d{4})", raw)
+    if match_en1:
+        day = int(match_en1.group(1))
+        m_name = match_en1.group(2)
+        year = int(match_en1.group(3))
+        if m_name in months_en:
+            try:
+                return datetime(year, months_en[m_name], day).date()
+            except ValueError:
+                pass
+                
+    match_en2 = re.search(r"([a-z]{3,9})\s+(\d{1,2})\s*,?\s*(\d{4})", raw)
+    if match_en2:
+        m_name = match_en2.group(1)
+        day = int(match_en2.group(2))
+        year = int(match_en2.group(3))
+        if m_name in months_en:
+            try:
+                return datetime(year, months_en[m_name], day).date()
+            except ValueError:
+                pass
+                
+    match_en3 = re.search(r"([a-z]{3,9})\s+(\d{4})", raw)
+    if match_en3:
+        m_name = match_en3.group(1)
+        year = int(match_en3.group(2))
+        if m_name in months_en:
+            try:
+                return datetime(year, months_en[m_name], 1).date()
+            except ValueError:
+                pass
+
+    # 5. Slash format: DD/MM/YYYY or MM/DD/YYYY
+    match_slash = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", raw)
+    if match_slash:
+        # try DD/MM/YYYY first
+        p1, p2, year = int(match_slash.group(1)), int(match_slash.group(2)), int(match_slash.group(3))
+        try:
+            return datetime(year, p2, p1).date()
+        except ValueError:
+            try:
+                return datetime(year, p1, p2).date()
+            except ValueError:
+                pass
+                
+    return None
+
 
 
 # ==========================================
@@ -111,11 +191,12 @@ def strip_html_tags(text: Optional[str], default: str = "") -> str:
 # ==========================================
 class TravelokaCrawlerEngine:
     def __init__(self, headless: bool = True, max_pages: int = 114, max_hotels: int = 5000,
-                 min_reviews: int = 20, data_dir: Optional[Path] = None):
+                 min_reviews: int = 20, data_dir: Optional[Path] = None, last_crawl_at: Optional[int] = None):
         self.headless = headless
         self.max_pages = max_pages
         self.max_hotels = max_hotels
         self.min_reviews = min_reviews
+        self.last_crawl_at = last_crawl_at
         
         self.data_dir = data_dir or (Path.cwd() / "dataset")
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -1353,6 +1434,13 @@ class TravelokaCrawlerEngine:
         return records
 
     def crawl_reviews(self, page: Page, hotel_id: str, min_reviews: int = 20) -> List[Dict[str, Any]]:
+        last_crawl_date = None
+        if getattr(self, "last_crawl_at", None):
+            try:
+                last_crawl_date = datetime.fromtimestamp(self.last_crawl_at, tz=timezone.utc).date()
+            except Exception:
+                pass
+
         records = []
         seen = set()
         no_growth_rounds = 0
@@ -1412,6 +1500,12 @@ class TravelokaCrawlerEngine:
                         review_date = normalize_text(parsed.get("review_date"), default="")
                         if not review_date or review_date == "N/A":
                             review_date = self.current_crawl_date()
+
+                        if last_crawl_date:
+                            rev_date_obj = parse_review_date_to_obj(review_date)
+                            if rev_date_obj and rev_date_obj < last_crawl_date:
+                                logging.info(f"[Traveloka] Skip review with date {review_date} before last crawl date {last_crawl_date}")
+                                continue
 
                         item = {
                             "review_id": str(uuid.uuid4()),
@@ -1552,6 +1646,7 @@ class TravelokaCrawlerEngine:
     def run(self) -> None:
         logging.info("[Traveloka] Starting Traveloka crawler...")
         self.init_outputs(reset=self.reset_outputs)
+        self.crawled_urls = set()
         done_hotel_ids = self.load_done_hotel_ids_from_checkpoint() if self.resume_crawl else set()
         
         if done_hotel_ids:
@@ -1578,16 +1673,51 @@ class TravelokaCrawlerEngine:
 
                     def _process_page_hotels(page_hotels: List[Dict[str, Any]], page_number: int) -> None:
                         total_on_page = len(page_hotels)
-                        logging.info(f"[Traveloka] Page {page_number} produced {total_on_page} new hotels; starting detail crawl.")
+                        stale_on_page = 0
+                        if hasattr(self, "check_freshness_callback"):
+                            for hotel in page_hotels:
+                                link = hotel.get("link")
+                                if link and self.check_freshness_callback(link):
+                                    stale_on_page += 1
+                        else:
+                            stale_on_page = total_on_page
+                        logging.info(
+                            f"[Traveloka] Trang {page_number} tìm thấy {total_on_page} khách sạn. "
+                            f"Trong đó có {stale_on_page} khách sạn cần cập nhật thông tin chi tiết."
+                        )
                         for offset, hotel in enumerate(page_hotels, 1):
                             processed_counter["count"] += 1
+                            link = hotel.get("link")
+                            
+                            # Freshness check
+                            if link and hasattr(self, "check_freshness_callback") and not self.check_freshness_callback(link):
+                                logging.info(f"[Traveloka] Bỏ qua khách sạn vừa mới cào gần đây: {link}")
+                                if self.resume_crawl:
+                                    self.save_checkpoint_done(hotel, reason="freshness_skip")
+                                    done_hotel_ids.add(hotel["hotel_id"])
+                                continue
+                                
                             logging.info(
-                                f"[Traveloka] [page {page_number} | {offset}/{total_on_page} | total_processed={processed_counter['count']}] Crawl detail: {hotel['link']}"
+                                f"[Traveloka] [page {page_number} | {offset}/{total_on_page} | total_processed={processed_counter['count']}] Crawl detail: {link}"
                             )
                             success = self.crawl_detail(context, hotel)
-                            if success and self.resume_crawl:
-                                self.save_checkpoint_done(hotel, reason="processed_or_skipped")
-                                done_hotel_ids.add(hotel["hotel_id"])
+                            if success:
+                                if link:
+                                    self.crawled_urls.add(link)
+                                if self.resume_crawl:
+                                    self.save_checkpoint_done(hotel, reason="processed_or_skipped")
+                                    done_hotel_ids.add(hotel["hotel_id"])
+                                if hasattr(self, "save_entity_callback"):
+                                    try:
+                                        self.save_entity_callback(
+                                            link,
+                                            hotel.get("name", ""),
+                                            json.dumps(hotel, ensure_ascii=False),
+                                            int(float(hotel.get("review_count") or 0)),
+                                            hotel.get("full_address", "") or hotel.get("address", "")
+                                        )
+                                    except Exception as e:
+                                        logging.error(f"[Traveloka] Error calling save_entity_callback: {e}")
                             if processed_counter["count"] >= self.max_hotels:
                                 break
 
@@ -1600,17 +1730,77 @@ class TravelokaCrawlerEngine:
                 else:
                     hotels = self.crawl_list(page, skip_hotel_ids=done_hotel_ids if self.resume_crawl else None)
                     logging.info(f"[Traveloka] Total list records: {len(hotels)}")
+                    stale_count = 0
+                    if hasattr(self, "check_freshness_callback"):
+                        for hotel in hotels:
+                            link = hotel.get("link")
+                            if link and self.check_freshness_callback(link):
+                                stale_count += 1
+                    else:
+                        stale_count = len(hotels)
+                    logging.info(f"[Traveloka] Có {stale_count}/{len(hotels)} khách sạn cần cập nhật thông tin chi tiết.")
                     for idx, hotel in enumerate(hotels, 1):
+                        link = hotel.get("link")
                         if self.resume_crawl and hotel["hotel_id"] in done_hotel_ids:
-                            logging.info(f"[Traveloka] [{idx}/{len(hotels)}] Skip completed: {hotel['link']}")
+                            logging.info(f"[Traveloka] [{idx}/{len(hotels)}] Skip completed: {link}")
                             continue
-                        logging.info(f"[Traveloka] [{idx}/{len(hotels)}] Crawl detail: {hotel['link']}")
+                        
+                        # Freshness check
+                        if link and hasattr(self, "check_freshness_callback") and not self.check_freshness_callback(link):
+                            logging.info(f"[Traveloka] Bỏ qua khách sạn vừa mới cào gần đây: {link}")
+                            if self.resume_crawl:
+                                self.save_checkpoint_done(hotel, reason="freshness_skip")
+                                done_hotel_ids.add(hotel["hotel_id"])
+                            continue
+                            
+                        logging.info(f"[Traveloka] [{idx}/{len(hotels)}] Crawl detail: {link}")
                         success = self.crawl_detail(context, hotel)
-                        if success and self.resume_crawl:
-                            self.save_checkpoint_done(hotel, reason="processed_or_skipped")
-                            done_hotel_ids.add(hotel["hotel_id"])
+                        if success:
+                            if link:
+                                self.crawled_urls.add(link)
+                            if self.resume_crawl:
+                                self.save_checkpoint_done(hotel, reason="processed_or_skipped")
+                                done_hotel_ids.add(hotel["hotel_id"])
+                            if hasattr(self, "save_entity_callback"):
+                                try:
+                                    self.save_entity_callback(
+                                        link,
+                                        hotel.get("name", ""),
+                                        json.dumps(hotel, ensure_ascii=False),
+                                        int(float(hotel.get("review_count") or 0)),
+                                        hotel.get("full_address", "") or hotel.get("address", "")
+                                    )
+                                except Exception as e:
+                                    logging.error(f"[Traveloka] Error calling save_entity_callback: {e}")
                         if idx >= self.max_hotels:
                             break
+
+                # Crawl thêm các stale target_urls từ DB chưa được crawl trong lượt list
+                if hasattr(self, "target_urls") and self.target_urls:
+                    remaining_targets = [url for url in self.target_urls if url not in self.crawled_urls]
+                    if remaining_targets:
+                        logging.info(f"[Traveloka] Cào thêm {len(remaining_targets)} khách sạn đã cũ từ DB không có trong danh sách...")
+                        for idx, url in enumerate(remaining_targets, 1):
+                            h_id = hashlib.md5(url.encode("utf-8")).hexdigest()[:16]
+                            hotel = {
+                                "link": url,
+                                "hotel_id": h_id,
+                                "name": f"Stale Hotel {idx}"
+                            }
+                            logging.info(f"[Traveloka] [Cập nhật trực tiếp {idx}/{len(remaining_targets)}] Cào chi tiết: {url}")
+                            success = self.crawl_detail(context, hotel)
+                            if success:
+                                if hasattr(self, "save_entity_callback"):
+                                    try:
+                                        self.save_entity_callback(
+                                            url,
+                                            hotel.get("name", ""),
+                                            json.dumps(hotel, ensure_ascii=False),
+                                            int(float(hotel.get("review_count") or 0)),
+                                            hotel.get("full_address", "") or hotel.get("address", "")
+                                        )
+                                    except Exception as e:
+                                        logging.error(f"[Traveloka] Error calling save_entity_callback: {e}")
             except Exception as exc:
                 logging.error(f"[Traveloka] Fatal error in main: {exc}")
             finally:
@@ -1624,13 +1814,14 @@ class TravelokaCrawlerEngine:
 class BookingCrawlerEngine:
     def __init__(self, headless: bool = True, max_pages: int = 2, max_properties: int = 50, 
                  min_reviews: int = 10, search_city: str = "Da Nang", search_queries: Optional[List[str]] = None,
-                 data_dir: Optional[Path] = None):
+                 data_dir: Optional[Path] = None, last_crawl_at: Optional[int] = None):
         self.headless = headless
         self.max_pages = max_pages
         self.max_properties = max_properties
         self.min_reviews = min_reviews
         self.search_city = search_city
         self.search_queries = search_queries
+        self.last_crawl_at = last_crawl_at
         
         self.data_dir = data_dir or (Path.cwd() / "data")
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -2589,14 +2780,28 @@ class BookingCrawlerEngine:
         return records
 
     def crawl_reviews(self, page: Page, hotel_id: str, min_reviews: int = 10) -> List[Dict[str, Any]]:
+        last_crawl_date = None
+        if getattr(self, "last_crawl_at", None):
+            try:
+                last_crawl_date = datetime.fromtimestamp(self.last_crawl_at, tz=timezone.utc).date()
+            except Exception:
+                pass
+
         records = []
         seen = set()
 
         apollo_reviews = self._extract_featured_reviews_from_apollo(page, hotel_id, min_reviews)
         if apollo_reviews:
+            filtered_apollo = []
             for row in apollo_reviews:
+                rdate_str = row.get("review_date")
+                rev_date_obj = parse_review_date_to_obj(rdate_str)
+                if last_crawl_date and rev_date_obj and rev_date_obj < last_crawl_date:
+                    logging.info(f"[Booking] Skip apollo review with date {rdate_str} before last crawl date {last_crawl_date}")
+                    continue
+                filtered_apollo.append(row)
                 self.save_review(row)
-            return apollo_reviews
+            return filtered_apollo
 
         self._open_reviews_section(page)
 
@@ -2643,6 +2848,12 @@ class BookingCrawlerEngine:
                     parsed = self._parse_booking_review_text(chunk)
                     if parsed is None:
                         continue
+                    
+                    rev_date_obj = parse_review_date_to_obj(parsed["review_date"])
+                    if last_crawl_date and rev_date_obj and rev_date_obj < last_crawl_date:
+                        logging.info(f"[Booking] Skip chunk review with date {parsed['review_date']} before last crawl date {last_crawl_date}")
+                        continue
+                    
                     key = (parsed["reviewer_name"], parsed["review_date"], parsed["review_text"])
                     if key in seen:
                         continue
@@ -2675,6 +2886,11 @@ class BookingCrawlerEngine:
 
             parsed = self._parse_booking_review_text(text)
             if parsed is None:
+                continue
+
+            rev_date_obj = parse_review_date_to_obj(parsed["review_date"])
+            if last_crawl_date and rev_date_obj and rev_date_obj < last_crawl_date:
+                logging.info(f"[Booking] Skip block review with date {parsed['review_date']} before last crawl date {last_crawl_date}")
                 continue
 
             review_item = {
@@ -2762,6 +2978,7 @@ class BookingCrawlerEngine:
     def run(self) -> None:
         logging.info("[Booking] Starting Booking.com crawler...")
         self.init_outputs()
+        self.crawled_urls = set()
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless, args=["--disable-blink-features=AutomationControlled", "--no-sandbox"])
@@ -2778,13 +2995,69 @@ class BookingCrawlerEngine:
             try:
                 items = self.crawl_list(page)
                 logging.info(f"[Booking] List records collected: {len(items)}")
+                stale_count = 0
+                if hasattr(self, "check_freshness_callback"):
+                    for item in items:
+                        link = item.get("link")
+                        if link and self.check_freshness_callback(link):
+                            stale_count += 1
+                else:
+                    stale_count = len(items)
+                logging.info(f"[Booking] Có {stale_count}/{len(items)} khách sạn cần cập nhật thông tin chi tiết.")
                 for idx, item in enumerate(items, 1):
-                    logging.info(f"[Booking] [{idx}/{len(items)}] Crawl detail: {item.get('link')}")
+                    link = item.get("link")
+                    if link and hasattr(self, "check_freshness_callback") and not self.check_freshness_callback(link):
+                        logging.info(f"[Booking] Bỏ qua khách sạn vừa mới cào gần đây: {link}")
+                        continue
+                    logging.info(f"[Booking] [{idx}/{len(items)}] Crawl detail: {link}")
                     ok = self.crawl_detail(context, item)
                     if ok:
                         saved += 1
+                        if link:
+                            self.crawled_urls.add(link)
+                        if hasattr(self, "save_entity_callback"):
+                            try:
+                                self.save_entity_callback(
+                                    link,
+                                    item.get("name", ""),
+                                    json.dumps(item, ensure_ascii=False),
+                                    int(float(item.get("review_count") or 0)),
+                                    item.get("full_address", "") or item.get("address", "")
+                                )
+                            except Exception as e:
+                                logging.error(f"[Booking] Error calling save_entity_callback: {e}")
                     if saved >= self.max_properties:
                         break
+
+                # Crawl thêm các stale target_urls từ DB chưa được crawl trong lượt list
+                if hasattr(self, "target_urls") and self.target_urls:
+                    remaining_targets = [url for url in self.target_urls if url not in self.crawled_urls]
+                    if remaining_targets:
+                        logging.info(f"[Booking] Cào thêm {len(remaining_targets)} khách sạn đã cũ từ DB không có trong danh sách...")
+                        for idx, url in enumerate(remaining_targets, 1):
+                            h_id = hashlib.md5(url.encode("utf-8")).hexdigest()[:16]
+                            item = {
+                                "link": url,
+                                "hotel_id": h_id,
+                                "name": f"Stale Hotel {idx}"
+                            }
+                            logging.info(f"[Booking] [Cập nhật trực tiếp {idx}/{len(remaining_targets)}] Cào chi tiết: {url}")
+                            ok = self.crawl_detail(context, item)
+                            if ok:
+                                saved += 1
+                                if hasattr(self, "save_entity_callback"):
+                                    try:
+                                        self.save_entity_callback(
+                                            url,
+                                            item.get("name", ""),
+                                            json.dumps(item, ensure_ascii=False),
+                                            int(float(item.get("review_count") or 0)),
+                                            item.get("full_address", "") or item.get("address", "")
+                                        )
+                                    except Exception as e:
+                                        logging.error(f"[Booking] Error calling save_entity_callback: {e}")
+                            if saved >= self.max_properties:
+                                break
             finally:
                 browser.close()
 

@@ -20,8 +20,10 @@ def get_state() -> dict:
 
 
 class RunCtx:
-    def __init__(self, run_id: int) -> None:
+    def __init__(self, run_id: int, trigger: str = "manual", force: bool = False) -> None:
         self.run_id = run_id
+        self.trigger = trigger
+        self.force = force
 
     async def log(self, level: str, msg: str) -> None:
         log_bus.publish(f"[{time.strftime('%H:%M:%S')}] {level.upper()}: {msg}")
@@ -31,10 +33,10 @@ class RunCtx:
             pass
 
 
-async def _run_one(key: str, trigger: str) -> None:
+async def _run_one(key: str, trigger: str, force: bool = False) -> None:
     eng = ENGINES[key]
     run_id = await db.create_run(engine=key, trigger=trigger)
-    ctx = RunCtx(run_id)
+    ctx = RunCtx(run_id, trigger, force)
     _state.update(running=True, engine=key, run_id=run_id)
     await ctx.log("info", f"══ Engine '{key}' bắt đầu (trigger={trigger}) ══")
     try:
@@ -68,6 +70,6 @@ async def run_engines(keys: list[str], trigger: str = "manual", force: bool = Fa
                             f"[{time.strftime('%H:%M:%S')}] INFO: Bỏ qua '{key}' (mới chạy gần đây)."
                         )
                         continue
-                await _run_one(key, trigger)
+                await _run_one(key, trigger, force=force)
         finally:
             _state.update(running=False, engine=None)

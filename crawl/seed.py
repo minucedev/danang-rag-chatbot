@@ -33,7 +33,7 @@ DATA_FOODY = DATA_DIR / "foody"
 DATA_TRAVELOKA = DATA_DIR / "traveloka"
 DATA_BOOKING = DATA_DIR / "booking"
 
-LAST_CRAWL_AT_DAYS_AGO = 0
+LAST_CRAWL_AT_DAYS_AGO = 10
 
 
 def extract_district(address: str) -> str:

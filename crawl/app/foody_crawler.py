@@ -157,13 +157,21 @@ async def crawl_detail(page: Page, url: str) -> dict:
     return _build_detail(raw, url)
 
 
-async def crawl_detail_with_reviews(page: Page, url: str, review_limit: int) -> tuple[dict, list[dict]]:
+async def crawl_detail_with_reviews(page: Page, url: str, review_limit: int, last_crawl_at: Optional[int] = None) -> tuple[dict, list[dict]]:
     """Crawl chi tiết + review trên CÙNG 1 lần goto (không cần truy cập trang 2 lần).
 
     Trả (detail_dict, reviews_list). reviews_list có thể rỗng nếu review_limit<=0
     hoặc không load được review.
     """
     from app import foody_review_crawler
+    from datetime import datetime
+
+    last_crawl_dt = None
+    if last_crawl_at:
+        try:
+            last_crawl_dt = datetime.fromtimestamp(last_crawl_at)
+        except Exception:
+            pass
 
     await _goto_and_wait(page, url)
     raw = await page.evaluate(EXTRACT_JS)
@@ -190,6 +198,12 @@ async def crawl_detail_with_reviews(page: Page, url: str, review_limit: int) -> 
 
                 username = await safe(".ru-username")
                 time_text = await safe("div.ru-stats > span")
+
+                if last_crawl_dt:
+                    from app.review_preprocessor import parse_time
+                    parsed_time = parse_time(time_text)
+                    if parsed_time and parsed_time < last_crawl_dt:
+                        continue
                 score = foody_review_crawler.extract_score(await safe(".review-points"))
 
                 content = ""
