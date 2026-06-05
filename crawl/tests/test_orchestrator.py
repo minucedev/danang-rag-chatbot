@@ -1,6 +1,7 @@
 """Test orchestrator: freshness gate (skip/force), unknown key, khóa 1-run.
 Monkeypatch _run_one (tránh chạy engine thật) + db.list_engine_state."""
 from __future__ import annotations
+import asyncio
 import time
 
 import pytest
@@ -86,6 +87,9 @@ async def test_hotel_runner_registers_callbacks(tmp_db, monkeypatch):
     assert res == {"total": 0, "ok": 0, "failed": 0}
     assert hasattr(mock_engine_instance, "check_freshness_callback")
     assert hasattr(mock_engine_instance, "save_entity_callback")
-    assert mock_engine_instance.check_freshness_callback("https://hotel-dummy/1") is True
+    # check_freshness dùng run_coroutine_threadsafe(...).result() → phải gọi từ thread worker
+    # (như engine sync chạy qua run_in_executor), không phải từ thread event loop, nếu không sẽ deadlock.
+    result = await asyncio.to_thread(mock_engine_instance.check_freshness_callback, "https://hotel-dummy/1")
+    assert result is True
 
 

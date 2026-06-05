@@ -93,6 +93,13 @@ def stable_hotel_id(link: str) -> str:
     digest = hashlib.md5(link.encode("utf-8")).hexdigest()[:16]
     return f"hotel_{digest}"
 
+def stable_review_id(hotel_id: str, reviewer: str, review_date: str, review_text: str) -> str:
+    """ID review ổn định theo nội dung — để crawl lại cùng review không sinh point trùng.
+    Khớp các trường ingest dùng cho doc_id (hid, reviewer, rdate, text[:120])."""
+    raw = "||".join([str(hotel_id), str(reviewer), str(review_date), str(review_text)[:120]])
+    digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
+    return f"review_{digest}"
+
 def strip_html_tags(text: Optional[str], default: str = "") -> str:
     if text is None:
         return default
@@ -1502,17 +1509,19 @@ class TravelokaCrawlerEngine:
                             continue
 
                         review_date = normalize_text(parsed.get("review_date"), default="")
-                        if not review_date or review_date == "N/A":
-                            review_date = self.current_crawl_date()
+                        if review_date == "N/A":
+                            # Không backfill bằng ngày hôm nay (đổi mỗi ngày → doc_id ingest đổi → trùng).
+                            # Để rỗng: review không rõ ngày vẫn được giữ nhưng id ổn định qua các lần crawl.
+                            review_date = ""
 
-                        if last_crawl_date:
+                        if last_crawl_date and review_date:
                             rev_date_obj = parse_review_date_to_obj(review_date)
                             if rev_date_obj and rev_date_obj < last_crawl_date:
                                 logging.info(f"[Traveloka] Skip review with date {review_date} before last crawl date {last_crawl_date}")
                                 continue
 
                         item = {
-                            "review_id": str(uuid.uuid4()),
+                            "review_id": stable_review_id(hotel_id, parsed["reviewer_name"], review_date, parsed["review_text"]),
                             "hotel_id": hotel_id,
                             "reviewer_name": parsed["reviewer_name"],
                             "review_text": parsed["review_text"],
@@ -1647,6 +1656,61 @@ class TravelokaCrawlerEngine:
         finally:
             detail_page.close()
 
+    def _max_hotels_reached(self) -> bool:
+        """Limit đếm theo số KS đã cào THÀNH CÔNG (crawled_urls), không tính KS bị skip do freshness."""
+        return len(self.crawled_urls) >= self.max_hotels
+
+    def _stream_detail_for_page(self, context, page_hotels, page_number, done_hotel_ids, processed_counter):
+        """Cào chi tiết từng KS trong 1 trang list (stream). Tách từ closure trong run() để test được."""
+        total_on_page = len(page_hotels)
+        stale_on_page = 0
+        if hasattr(self, "check_freshness_callback"):
+            for hotel in page_hotels:
+                link = hotel.get("link")
+                if link and self.check_freshness_callback(link):
+                    stale_on_page += 1
+        else:
+            stale_on_page = total_on_page
+        logging.info(
+            f"[Traveloka] Trang {page_number} tìm thấy {total_on_page} khách sạn. "
+            f"Trong đó có {stale_on_page} khách sạn cần cập nhật thông tin chi tiết."
+        )
+        for offset, hotel in enumerate(page_hotels, 1):
+            processed_counter["count"] += 1
+            link = hotel.get("link")
+
+            # Freshness check
+            if link and hasattr(self, "check_freshness_callback") and not self.check_freshness_callback(link):
+                logging.info(f"[Traveloka] Bỏ qua khách sạn vừa mới cào gần đây: {link}")
+                if self.resume_crawl:
+                    self.save_checkpoint_done(hotel, reason="freshness_skip")
+                    done_hotel_ids.add(hotel["hotel_id"])
+                continue
+
+            logging.info(
+                f"[Traveloka] [page {page_number} | {offset}/{total_on_page} | total_processed={processed_counter['count']}] Crawl detail: {link}"
+            )
+            success = self.crawl_detail(context, hotel)
+            if success:
+                if link:
+                    self.crawled_urls.add(link)
+                if self.resume_crawl:
+                    self.save_checkpoint_done(hotel, reason="processed_or_skipped")
+                    done_hotel_ids.add(hotel["hotel_id"])
+                if hasattr(self, "save_entity_callback"):
+                    try:
+                        self.save_entity_callback(
+                            link,
+                            hotel.get("name", ""),
+                            json.dumps(hotel, ensure_ascii=False),
+                            int(float(hotel.get("review_count") or 0)),
+                            hotel.get("full_address", "") or hotel.get("address", "")
+                        )
+                    except Exception as e:
+                        logging.error(f"[Traveloka] Error calling save_entity_callback: {e}")
+            if self._max_hotels_reached():
+                break
+
     def run(self) -> None:
         logging.info("[Traveloka] Starting Traveloka crawler...")
         self.init_outputs(reset=self.reset_outputs)
@@ -1676,54 +1740,9 @@ class TravelokaCrawlerEngine:
                     processed_counter = {"count": 0}
 
                     def _process_page_hotels(page_hotels: List[Dict[str, Any]], page_number: int) -> None:
-                        total_on_page = len(page_hotels)
-                        stale_on_page = 0
-                        if hasattr(self, "check_freshness_callback"):
-                            for hotel in page_hotels:
-                                link = hotel.get("link")
-                                if link and self.check_freshness_callback(link):
-                                    stale_on_page += 1
-                        else:
-                            stale_on_page = total_on_page
-                        logging.info(
-                            f"[Traveloka] Trang {page_number} tìm thấy {total_on_page} khách sạn. "
-                            f"Trong đó có {stale_on_page} khách sạn cần cập nhật thông tin chi tiết."
+                        self._stream_detail_for_page(
+                            context, page_hotels, page_number, done_hotel_ids, processed_counter
                         )
-                        for offset, hotel in enumerate(page_hotels, 1):
-                            processed_counter["count"] += 1
-                            link = hotel.get("link")
-                            
-                            # Freshness check
-                            if link and hasattr(self, "check_freshness_callback") and not self.check_freshness_callback(link):
-                                logging.info(f"[Traveloka] Bỏ qua khách sạn vừa mới cào gần đây: {link}")
-                                if self.resume_crawl:
-                                    self.save_checkpoint_done(hotel, reason="freshness_skip")
-                                    done_hotel_ids.add(hotel["hotel_id"])
-                                continue
-                                
-                            logging.info(
-                                f"[Traveloka] [page {page_number} | {offset}/{total_on_page} | total_processed={processed_counter['count']}] Crawl detail: {link}"
-                            )
-                            success = self.crawl_detail(context, hotel)
-                            if success:
-                                if link:
-                                    self.crawled_urls.add(link)
-                                if self.resume_crawl:
-                                    self.save_checkpoint_done(hotel, reason="processed_or_skipped")
-                                    done_hotel_ids.add(hotel["hotel_id"])
-                                if hasattr(self, "save_entity_callback"):
-                                    try:
-                                        self.save_entity_callback(
-                                            link,
-                                            hotel.get("name", ""),
-                                            json.dumps(hotel, ensure_ascii=False),
-                                            int(float(hotel.get("review_count") or 0)),
-                                            hotel.get("full_address", "") or hotel.get("address", "")
-                                        )
-                                    except Exception as e:
-                                        logging.error(f"[Traveloka] Error calling save_entity_callback: {e}")
-                            if len(self.crawled_urls) >= self.max_hotels:
-                                break
 
                     hotels = self.crawl_list(
                         page,
@@ -2233,7 +2252,7 @@ class BookingCrawlerEngine:
             seen.add(signature)
 
             item = {
-                "review_id": str(uuid.uuid4()),
+                "review_id": stable_review_id(hotel_id, reviewer_name, review_date, review_text),
                 "hotel_id": hotel_id,
                 "reviewer_name": reviewer_name,
                 "review_text": review_text,
@@ -2871,7 +2890,7 @@ class BookingCrawlerEngine:
                         continue
                     seen.add(key)
                     item = {
-                        "review_id": str(uuid.uuid4()),
+                        "review_id": stable_review_id(hotel_id, parsed["reviewer_name"], parsed["review_date"], parsed["review_text"]),
                         "hotel_id": hotel_id,
                         "reviewer_name": parsed["reviewer_name"],
                         "review_text": parsed["review_text"],
@@ -2906,7 +2925,7 @@ class BookingCrawlerEngine:
                 continue
 
             review_item = {
-                "review_id": str(uuid.uuid4()),
+                "review_id": stable_review_id(hotel_id, parsed["reviewer_name"], parsed["review_date"], parsed["review_text"]),
                 "hotel_id": hotel_id,
                 "reviewer_name": parsed["reviewer_name"],
                 "review_text": parsed["review_text"],

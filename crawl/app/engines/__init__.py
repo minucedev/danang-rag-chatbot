@@ -50,12 +50,15 @@ def _count_csv_rows(path: Path) -> int:
 # ─── Foody engine (async: discovery API → detail Playwright → CSV + DB) ───────
 def _write_foody_csv(entities: list[dict]) -> None:
     rows = []
+    dropped = 0
     for e in entities:
         if e.get("data_json"):
             try:
                 rows.append(json.loads(e["data_json"]))
             except Exception:
-                pass
+                dropped += 1
+    if dropped:
+        logging.warning("_write_foody_csv: bỏ %d entity có data_json hỏng (không ghi vào CSV)", dropped)
     if not rows:
         return
     Path(config.DATA_FOODY).mkdir(parents=True, exist_ok=True)
@@ -176,8 +179,10 @@ async def _run_foody(ctx) -> dict:
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=config.FOODY_HEADLESS)
-        await asyncio.gather(*[_one(browser, e) for e in targets])
-        await browser.close()
+        try:
+            await asyncio.gather(*[_one(browser, e) for e in targets])
+        finally:
+            await browser.close()
 
     await ctx.log("info", "Đã hoàn thành lượt crawl chi tiết Foody.")
     return {"total": len(targets), "ok": counters["ok"], "failed": counters["failed"]}

@@ -13,6 +13,7 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -140,8 +141,8 @@ async def api_hotels():
                     "review_count": str(r.get("review_count", "")).strip(),
                     "address": str(r.get("full_address", "") or r.get("address", "")).strip()
                 })
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.warning("api_hotels: đọc %s lỗi: %s", traveloka_path, type(exc).__name__)
     # 2. Thử đọc Booking hotels
     booking_path = Path(config.DATA_BOOKING) / "hotels.csv"
     if booking_path.exists():
@@ -155,9 +156,9 @@ async def api_hotels():
                     "review_count": str(r.get("review_count", "")).strip(),
                     "address": str(r.get("full_address", "") or r.get("address", "")).strip()
                 })
-        except Exception:
-            pass
-        
+        except Exception as exc:
+            logging.warning("api_hotels: đọc %s lỗi: %s", booking_path, type(exc).__name__)
+
     return out
 
 

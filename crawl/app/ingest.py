@@ -518,11 +518,13 @@ def ensure_payload_indexes(client, name):
 
 
 def upsert_docs(client, name, embedder, docs, log, batch_size=64, encode_batch=32):
-    """Upsert docs vào Qdrant. Khi OOM thì giảm encode_batch_size rồi retry. Dọn GC mỗi batch."""
+    """Upsert docs vào Qdrant. Khi OOM thì giảm encode_batch_size rồi retry. Dọn GC mỗi batch.
+    Một batch lỗi (encode non-OOM, hoặc upsert) được log và BỎ QUA — không làm hỏng cả collection."""
     import gc
     if not docs:
         return 0
     total = 0
+    failed = 0
     for i in range(0, len(docs), batch_size):
         batch = docs[i:i + batch_size]
         texts = [d["text"] for d in batch]
@@ -537,15 +539,29 @@ def upsert_docs(client, name, embedder, docs, log, batch_size=64, encode_batch=3
                     client, name, embedder, docs[i:], log,
                     batch_size=batch_size, encode_batch=smaller,
                 )
-            raise
-        points = [PointStruct(id=d["id"], vector=v.tolist(),
-                              payload={**d["payload"], "content": d["text"]})
-                  for d, v in zip(batch, vectors)]
-        client.upsert(collection_name=name, points=points)
-        total += len(points)
-        log(f"  {name}: {total}/{len(docs)}")
-        del texts, vectors, points, batch
-        gc.collect()
+            failed += len(batch)
+            log(f"  ⚠ Bỏ batch {name}[{i}:{i+len(batch)}] — encode lỗi: {type(e).__name__}: {e}")
+            gc.collect()
+            continue
+        except Exception as e:
+            failed += len(batch)
+            log(f"  ⚠ Bỏ batch {name}[{i}:{i+len(batch)}] — encode lỗi: {type(e).__name__}: {e}")
+            gc.collect()
+            continue
+        try:
+            points = [PointStruct(id=d["id"], vector=v.tolist(),
+                                  payload={**d["payload"], "content": d["text"]})
+                      for d, v in zip(batch, vectors)]
+            client.upsert(collection_name=name, points=points)
+            total += len(points)
+            log(f"  {name}: {total}/{len(docs)}")
+        except Exception as e:
+            failed += len(batch)
+            log(f"  ⚠ Bỏ batch {name}[{i}:{i+len(batch)}] — upsert lỗi: {type(e).__name__}: {e}")
+        finally:
+            gc.collect()
+    if failed:
+        log(f"  ⚠ {name}: {failed}/{len(docs)} doc bị bỏ do lỗi batch (collection vẫn upsert phần còn lại)")
     return total
 
 

@@ -5,7 +5,7 @@ Tái dùng `foody_crawler.new_context` (fingerprint + chặn ảnh/font) cho con
 """
 from __future__ import annotations
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from app import config
 

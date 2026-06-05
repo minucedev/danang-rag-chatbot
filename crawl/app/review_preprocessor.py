@@ -6,6 +6,7 @@ và `preprocess_and_save(rows, output_dir)` để ghi CSV.
 from __future__ import annotations
 
 import csv
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -112,9 +113,11 @@ def preprocess_reviews(rows: list[dict]) -> list[dict]:
     → trả list dict đã thêm clean_content, parsed_time, recency_score.
     Bỏ review có clean_content <= 5 ký tự."""
     result: list[dict] = []
+    dropped = 0
     for row in rows:
         clean = preprocess_text(row.get("content", ""))
         if len(clean) <= 5:
+            dropped += 1
             continue
         parsed = parse_time(row.get("time", ""))
         result.append({
@@ -123,6 +126,8 @@ def preprocess_reviews(rows: list[dict]) -> list[dict]:
             "parsed_time": str(parsed) if parsed else "",
             "recency_score": compute_recency_score(parsed),
         })
+    if dropped:
+        logging.info("preprocess_reviews: bỏ %d/%d review (clean_content <= 5 ký tự)", dropped, len(rows))
     return result
 
 

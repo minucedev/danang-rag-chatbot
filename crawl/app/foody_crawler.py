@@ -4,8 +4,10 @@
 Context/fingerprint tách riêng để pipeline mở nhiều page song song.
 """
 from __future__ import annotations
+import logging
 import random
 import re
+from typing import Optional
 
 from playwright.async_api import Browser, Page
 
@@ -220,7 +222,9 @@ async def crawl_detail_with_reviews(page: Page, url: str, review_limit: int, las
                     "score": score,
                     "content": content,
                 })
-        except Exception:
-            pass  # review lỗi không ảnh hưởng detail
+        except Exception as exc:
+            # review lỗi không ảnh hưởng detail, nhưng phải log để phát hiện selector hỏng
+            # (nếu không, mọi quán trả 0 review sẽ trông giống quán thật sự không có review).
+            logging.warning("Foody review crawl lỗi cho %s: %s", url, type(exc).__name__)
 
     return detail, reviews
