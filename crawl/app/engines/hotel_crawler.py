@@ -1017,8 +1017,12 @@ class TravelokaCrawlerEngine:
 
             if expected_total and len(seen_links) >= expected_total:
                 break
-            if len(hotels) >= self.max_hotels:
-                break
+            if self.stream_detail_during_list:
+                if len(self.crawled_urls) >= self.max_hotels:
+                    break
+            else:
+                if len(hotels) >= self.max_hotels:
+                    break
 
         logging.info("[Traveloka] Total unique properties from list: %s", len(hotels))
         return hotels
@@ -1718,7 +1722,7 @@ class TravelokaCrawlerEngine:
                                         )
                                     except Exception as e:
                                         logging.error(f"[Traveloka] Error calling save_entity_callback: {e}")
-                            if processed_counter["count"] >= self.max_hotels:
+                            if len(self.crawled_urls) >= self.max_hotels:
                                 break
 
                     hotels = self.crawl_list(
@@ -1772,35 +1776,43 @@ class TravelokaCrawlerEngine:
                                     )
                                 except Exception as e:
                                     logging.error(f"[Traveloka] Error calling save_entity_callback: {e}")
-                        if idx >= self.max_hotels:
+                        if len(self.crawled_urls) >= self.max_hotels:
                             break
 
                 # Crawl thêm các stale target_urls từ DB chưa được crawl trong lượt list
                 if hasattr(self, "target_urls") and self.target_urls:
                     remaining_targets = [url for url in self.target_urls if url not in self.crawled_urls]
                     if remaining_targets:
-                        logging.info(f"[Traveloka] Cào thêm {len(remaining_targets)} khách sạn đã cũ từ DB không có trong danh sách...")
-                        for idx, url in enumerate(remaining_targets, 1):
-                            h_id = hashlib.md5(url.encode("utf-8")).hexdigest()[:16]
-                            hotel = {
-                                "link": url,
-                                "hotel_id": h_id,
-                                "name": f"Stale Hotel {idx}"
-                            }
-                            logging.info(f"[Traveloka] [Cập nhật trực tiếp {idx}/{len(remaining_targets)}] Cào chi tiết: {url}")
-                            success = self.crawl_detail(context, hotel)
-                            if success:
-                                if hasattr(self, "save_entity_callback"):
-                                    try:
-                                        self.save_entity_callback(
-                                            url,
-                                            hotel.get("name", ""),
-                                            json.dumps(hotel, ensure_ascii=False),
-                                            int(float(hotel.get("review_count") or 0)),
-                                            hotel.get("full_address", "") or hotel.get("address", "")
-                                        )
-                                    except Exception as e:
-                                        logging.error(f"[Traveloka] Error calling save_entity_callback: {e}")
+                        if len(self.crawled_urls) >= self.max_hotels:
+                            logging.info("[Traveloka] Đã đạt giới hạn max_hotels, không cào thêm stale target_urls.")
+                        else:
+                            logging.info(f"[Traveloka] Cào thêm {len(remaining_targets)} khách sạn đã cũ từ DB không có trong danh sách...")
+                            for idx, url in enumerate(remaining_targets, 1):
+                                if len(self.crawled_urls) >= self.max_hotels:
+                                    logging.info("[Traveloka] Đã đạt giới hạn max_hotels, dừng cào stale target_urls.")
+                                    break
+                                h_id = hashlib.md5(url.encode("utf-8")).hexdigest()[:16]
+                                hotel = {
+                                    "link": url,
+                                    "hotel_id": h_id,
+                                    "name": f"Stale Hotel {idx}"
+                                }
+                                logging.info(f"[Traveloka] [Cập nhật trực tiếp {idx}/{len(remaining_targets)}] Cào chi tiết: {url}")
+                                success = self.crawl_detail(context, hotel)
+                                if success:
+                                    if url:
+                                        self.crawled_urls.add(url)
+                                    if hasattr(self, "save_entity_callback"):
+                                        try:
+                                            self.save_entity_callback(
+                                                url,
+                                                hotel.get("name", ""),
+                                                json.dumps(hotel, ensure_ascii=False),
+                                                int(float(hotel.get("review_count") or 0)),
+                                                hotel.get("full_address", "") or hotel.get("address", "")
+                                            )
+                                        except Exception as e:
+                                            logging.error(f"[Traveloka] Error calling save_entity_callback: {e}")
             except Exception as exc:
                 logging.error(f"[Traveloka] Fatal error in main: {exc}")
             finally:

@@ -39,17 +39,23 @@ uvicorn app.server:app --port 8100 --reload
 Mở http://localhost:8100
 
 ## Cấu hình (env, tùy chọn)
+Các biến môi trường cấu hình trong file `.env` hoặc truyền trực tiếp khi khởi chạy:
+
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
-| `CRAWL_SCHEDULE_HOURS` | 24 | Chu kỳ scheduler |
-| `CRAWL_JOB_FRESHNESS_HOURS` | 20 | Bỏ qua engine vừa chạy < ngần này |
-| `CRAWL_FRESHNESS_HOURS` | 24 | Freshness từng quán Foody |
-| `CRAWL_DISCOVERY_MAX_NEW` | 100 | Cap số quán Foody mỗi lần |
-| `CRAWL_TRAVELOKA_MAX_PAGES/HOTELS/REVIEWS` | 3/30/10 | Giới hạn Traveloka (thấp = an toàn) |
-| `CRAWL_BOOKING_MAX_PAGES/PROPERTIES/MIN_REVIEWS` | 2/30/10 | Giới hạn Booking |
-| `CRAWL_FOODY_HEADLESS` | true | Bật chế độ không giao diện (headless) cho Foody (vì crawl nhẹ, dựa trên API) |
-| `CRAWL_HOTEL_HEADLESS` | false | Bật chế độ không giao diện (headless) cho Traveloka/Booking (mặc định `false` để tránh bị bot detection chặn) |
-| `CRAWL_SCHEDULE_ENABLED` | true | Bật/tắt scheduler |
+| `CRAWL_SCHEDULE_ENABLED` | `true` | Bật/tắt scheduler tự động cào định kỳ |
+| `CRAWL_SCHEDULE_HOURS` | `24` | Chu kỳ chạy của scheduler (giờ) |
+| `CRAWL_JOB_FRESHNESS_HOURS` | `20` | Bỏ qua engine (Foody/Traveloka/Booking) vừa chạy thành công trong vòng < ngần này giờ |
+| `CRAWL_FRESHNESS_HOURS` | `48` | Bỏ qua các địa điểm/khách sạn đơn lẻ mới được cào trong vòng < ngần này giờ |
+| `CRAWL_STALE_HOURS` | `720` | Số giờ hết hạn (stale) của dữ liệu (mặc định 30 ngày). Đạt mốc này sẽ ép cào lại |
+| `CRAWL_FOODY_HEADLESS` | `true` | Chế độ headless cho Foody (vì crawl nhẹ qua API) |
+| `CRAWL_TRAVELOKA/BOOKING_HEADLESS` | `false / true` | Chế độ headless cho Traveloka/Booking |
+| `CRAWL_DISCOVERY_MAX_NEW` | `100` | Giới hạn tối đa số địa điểm mới thêm vào hàng đợi của Foody mỗi lần |
+| `CRAWL_TRAVELOKA_MAX_PAGES/MAX_HOTELS/REVIEWS` | `3/30/10` | Giới hạn Traveloka (số trang/số khách sạn tối đa/số review tối thiểu) |
+| `CRAWL_BOOKING_MAX_PAGES/MAX_PROPERTIES/MIN_REVIEWS` | `2/30/10` | Giới hạn Booking.com (số trang/số khách sạn tối đa/số review tối thiểu) |
+| `CRAWL_BOOKING_CITY` | `Da Nang` | Tên thành phố mục tiêu để cào và kiểm tra địa giới trên Booking.com |
+| `CRAWL_MAX_WORKERS` | `4` | Số luồng chạy song song tối đa (Foody) |
+| `CRAWL_PORT` | `8100` | Port khởi chạy web server quản trị |
 
 ## Cấu trúc thư mục
 ```
@@ -72,5 +78,5 @@ crawl/app/
 ```
 
 ## Lưu ý
-- Traveloka/Booking chống bot mạnh; headless dễ bị chặn nên `CRAWL_HOTEL_HEADLESS` mặc định là `false`. Nếu muốn chạy ẩn danh hoàn toàn, hãy cấu hình `CRAWL_HOTEL_HEADLESS=true`.
+- Traveloka/Booking chống bot rất mạnh; chạy headless dễ bị chặn hơn. Do đó `CRAWL_TRAVELOKA_HEADLESS` mặc định là `false` để chạy giao diện nổi. Bạn có thể bật ẩn danh bằng cách chuyển `CRAWL_TRAVELOKA_HEADLESS=true` hoặc `CRAWL_BOOKING_HEADLESS=true`.
 - Mỗi lúc chỉ chạy **1 engine** để đảm bảo tài nguyên hệ thống (Playwright ngốn tài nguyên trình duyệt lớn).
