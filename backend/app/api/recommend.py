@@ -1,7 +1,8 @@
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.api.deps import get_current_user
 from app.db import sessions as session_db
 from app.db import profiles as profile_db
 from app.rag.recommend import recommend_for_profile
@@ -25,9 +26,8 @@ def _get_qdrant_client():
     response_model=RecommendResponse,
     response_model_by_alias=True,
 )
-async def recommend(req: RecommendRequest):
-    session = await session_db.get_session(req.session_id)
-    if not session:
+async def recommend(req: RecommendRequest, user: dict = Depends(get_current_user)):
+    if not await session_db.session_owned_by(req.session_id, user["id"]):
         raise HTTPException(status_code=404, detail="Session not found")
 
     profile = await profile_db.get_profile(req.session_id)

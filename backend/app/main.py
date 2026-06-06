@@ -21,6 +21,13 @@ os.environ.setdefault(
 )
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
+# Logging có cấu trúc dùng chung (thay print rải rác ở đường lỗi). Level qua env LOG_LEVEL.
+import logging
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -28,6 +35,7 @@ import torch
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from qdrant_client import AsyncQdrantClient
 from sentence_transformers import SentenceTransformer, CrossEncoder
 
@@ -38,6 +46,11 @@ from app.rag.pipeline import RAGPipeline
 import app.rag.pipeline as pl_module
 from app.crawlers.events_crawler import run_event_crawl
 from app.crawlers.places_crawler import run_place_crawl, run_new_places_crawl
+from app.crawl_admin import (
+    config as crawl_cfg, db as crawl_db,
+    orchestrator as crawl_orch, ingest as crawl_ingest,
+)
+from app.crawl_admin.engines import CRAWL_KEYS
 
 
 async def _scheduled_crawl() -> None:
@@ -74,7 +87,20 @@ async def _scheduled_new_places_crawl() -> None:
     except Exception as exc:
         print(f"[scheduler] new_places_crawl FAILED: {type(exc).__name__}: {exc}")
 
+async def _scheduled_crawl_admin() -> None:
+    if crawl_orch.is_running():
+        return
+    try:
+        await crawl_orch.run_engines(CRAWL_KEYS, trigger="scheduled", force=False)
+    except Exception as exc:
+        print(f"[crawl-admin] scheduled run failed: {type(exc).__name__}: {exc}")
+
+
 from app.api import chat, sessions, health, profile, recommend, admin, events, favorites, itineraries
+from app.api import auth as auth_api
+from app.api import admin_shell
+from app.api import crawl_admin as crawl_admin_api
+from app.api import metrics_admin
 
 
 @asynccontextmanager
@@ -123,8 +149,12 @@ async def lifespan(app: FastAPI):
     )
     pl_module._pipeline_instance = pipeline
 
+    # Crawl-admin tái dùng CHÍNH embedder này (tránh nạp BGE-M3 lần 2 ~2GB RAM).
+    crawl_ingest.set_shared_embedder(encoder)
+
     print("Initializing database...")
     await db.init_db()
+    await crawl_db.init_db()
 
     print("Starting schedulers...")
     scheduler = AsyncIOScheduler()
@@ -153,6 +183,18 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
+    # Auto-crawl khách sạn/nhà hàng — MẶC ĐỊNH TẮT (RAM ~4GB, chạy chung Playwright+chatbot).
+    # Bật bằng CRAWL_SCHEDULE_ENABLED=true.
+    if crawl_cfg.SCHEDULE_ENABLED:
+        scheduler.add_job(
+            _scheduled_crawl_admin,
+            "interval",
+            hours=crawl_cfg.SCHEDULE_HOURS,
+            id="crawl_admin_auto",
+            max_instances=1,
+            coalesce=True,
+        )
+        print(f"[crawl-admin] auto-scheduler ON — mỗi {crawl_cfg.SCHEDULE_HOURS}h")
     scheduler.start()
 
     print("Warming up pipeline (first GPU pass)...")
@@ -164,6 +206,7 @@ async def lifespan(app: FastAPI):
     # ── Shutdown ─────────────────────────────────────────────
     scheduler.shutdown(wait=False)
     await db.close_db()
+    await crawl_db.close_db()
     await qdrant.close()
 
 
@@ -177,6 +220,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_api.router)
 app.include_router(chat.router)
 app.include_router(sessions.router)
 app.include_router(health.router)
@@ -186,6 +230,23 @@ app.include_router(admin.router)
 app.include_router(events.router)
 app.include_router(favorites.router)
 app.include_router(itineraries.router)
+app.include_router(admin_shell.router)
+app.include_router(crawl_admin_api.router)
+app.include_router(metrics_admin.router)
+
+# Static cho dashboard crawl (style.css) — phục vụ tại /admin/crawl/static/*
+app.mount(
+    "/admin/crawl/static",
+    StaticFiles(directory=str(Path(__file__).resolve().parent / "crawl_admin" / "static")),
+    name="crawl_admin_static",
+)
+
+# Static cho dashboard metrics — phục vụ tại /admin/metrics/static/*
+app.mount(
+    "/admin/metrics/static",
+    StaticFiles(directory=str(Path(__file__).resolve().parent / "metrics" / "static")),
+    name="metrics_admin_static",
+)
 
 # Module-level placeholder so health.py can check before pipeline loads
 pl_module._pipeline_instance = None

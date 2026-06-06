@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.db import sessions as session_db
+from app.api.deps import get_current_user, owned_session_or_404
 from app.db import profiles as profile_db
 from app.rag.schemas import UserProfile
 
@@ -12,7 +12,8 @@ router = APIRouter()
     response_model=UserProfile,
     response_model_by_alias=True,
 )
-async def get_profile(session_id: str):
+async def get_profile(session_id: str, user: dict = Depends(get_current_user)):
+    await owned_session_or_404(session_id, user)
     profile = await profile_db.get_profile(session_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -24,14 +25,13 @@ async def get_profile(session_id: str):
     response_model=UserProfile,
     response_model_by_alias=True,
 )
-async def upsert_profile(session_id: str, profile: UserProfile):
-    session = await session_db.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+async def upsert_profile(session_id: str, profile: UserProfile, user: dict = Depends(get_current_user)):
+    await owned_session_or_404(session_id, user)
     return await profile_db.upsert_profile(session_id, profile)
 
 
 @router.delete("/api/profile/{session_id}")
-async def delete_profile(session_id: str):
+async def delete_profile(session_id: str, user: dict = Depends(get_current_user)):
+    await owned_session_or_404(session_id, user)
     await profile_db.delete_profile(session_id)
     return {"ok": True}

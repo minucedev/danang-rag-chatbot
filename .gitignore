@@ -15,6 +15,10 @@ backend/.env
 backend/data/
 backend/data/chats.db*
 backend/models/
+backend/crawl_data/
+backend/metrics_data/
+frontend/data/
+/data/
 
 # Jupyter
 .ipynb_checkpoints/

@@ -1,7 +1,6 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiDelete } from "@/lib/api";
-import { getClientId } from "@/lib/clientId";
 import type { Source } from "@/lib/sourceAdapter";
 
 export interface Favorite {
@@ -15,8 +14,7 @@ export interface Favorite {
 export function useFavoritesQuery() {
   return useQuery<{ items: Favorite[]; total: number }>({
     queryKey: ["favorites"],
-    queryFn: () =>
-      apiFetch(`/api/favorites?clientId=${encodeURIComponent(getClientId())}`),
+    queryFn: () => apiFetch(`/api/favorites`),
     staleTime: 30_000,
   });
 }
@@ -27,7 +25,7 @@ export function useAddFavorite() {
     mutationFn: (input: { pointId: string; collection: string; snapshot: Source }) =>
       apiFetch("/api/favorites", {
         method: "POST",
-        body: JSON.stringify({ clientId: getClientId(), ...input }),
+        body: JSON.stringify(input),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["favorites"] }),
   });
@@ -37,7 +35,7 @@ export function useRemoveFavorite() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (favoriteId: number) =>
-      apiDelete(`/api/favorites/${favoriteId}?clientId=${encodeURIComponent(getClientId())}`),
+      apiDelete(`/api/favorites/${favoriteId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["favorites"] }),
   });
 }
