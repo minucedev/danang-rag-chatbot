@@ -6,9 +6,12 @@ Thư mục: backend/metrics_data/runs/<run_id>/
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger("app.metrics.store")
 
 # store.py -> metrics -> app -> backend
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -69,7 +72,7 @@ def list_runs() -> List[Dict[str, Any]]:
             data = json.loads(f.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
             # Bỏ qua run hỏng nhưng để lại dấu vết — tránh "mất run" lặng lẽ.
-            print(f"[metrics.store] bỏ qua run hỏng {f}: {type(exc).__name__}: {exc}")
+            logger.warning("[metrics.store] bỏ qua run hỏng %s: %s: %s", f, type(exc).__name__, exc)
             continue
         out.append({
             "id": data.get("id"),
@@ -93,7 +96,7 @@ def get_run(run_id: str) -> Optional[Dict[str, Any]]:
     try:
         return json.loads(f.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"[metrics.store] run hỏng {f}: {type(exc).__name__}: {exc}")
+        logger.warning("[metrics.store] run hỏng %s: %s: %s", f, type(exc).__name__, exc)
         return None
 
 

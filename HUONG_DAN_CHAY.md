@@ -168,6 +168,25 @@ Không cần chạy lệnh thứ hai — khi backend bật là dashboard có s�
 
 Seed dữ liệu ban đầu từ `raw_data/` (tuỳ chọn): `python backend/scripts/seed.py`.
 
+### 7b. Chỉ test giao diện admin (KHÔNG nạp model chatbot)
+
+Muốn xem/thử nhanh **dashboard crawl + metrics** mà không phải chờ nạp BGE-M3/LLM, dùng entrypoint nhẹ:
+
+```powershell
+cd backend
+python -m uvicorn app.admin_app:app --port 8000 --reload
+```
+Khởi động trong **vài giây**. Mở **một màn hình admin** có tab chuyển Crawl ↔ Metrics:
+- **http://localhost:8000/admin/**  ← gộp 2 dashboard, bấm tab để switch
+- (vẫn mở riêng được nếu cần: `/admin/crawl/` và `/admin/metrics/`)
+
+| Làm được (không cần model) | KHÔNG làm được (cần app đầy đủ) |
+|---|---|
+| Xem cả 2 dashboard, lịch sử run, CSV, log realtime (SSE) | Bấm **Chạy eval** ở metrics (cần pipeline thật) |
+| Chạy crawl **Foody** thủ công (cần `playwright install chromium`) | Job **ingest** sẽ tự nạp BGE-M3 (~2GB) vì không có embedder dùng chung |
+
+> Vẫn cần `QDRANT_URL` trong `backend\.env` (config validate lúc import; admin-only không gọi Qdrant nên giá trị bất kỳ cũng chạy). Không cần GEMINI/LLM để xem dashboard.
+
 ---
 
 ## Lỗi thường gặp

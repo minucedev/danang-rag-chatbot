@@ -1,9 +1,9 @@
 from __future__ import annotations
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
+from app.api._errors import tracked_500
 from app.db import itineraries as itin_db
 from app.rag.schemas import ItineraryCreate, ItineraryEntity
 
@@ -18,9 +18,7 @@ async def create_itinerary(body: ItineraryCreate, user: dict = Depends(get_curre
             user["id"], body.title, body.content_md, body.session_id
         )
     except Exception as e:
-        err_id = uuid.uuid4().hex[:8]
-        print(f"[itineraries] create error_id={err_id} {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"create itinerary failed (id={err_id})")
+        raise tracked_500("itineraries.create", e)
 
 
 @router.get("/api/itineraries")
@@ -28,9 +26,7 @@ async def list_itineraries(user: dict = Depends(get_current_user)):
     try:
         items = await itin_db.list_itineraries(user["id"])
     except Exception as e:
-        err_id = uuid.uuid4().hex[:8]
-        print(f"[itineraries] list error_id={err_id} {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"list itineraries failed (id={err_id})")
+        raise tracked_500("itineraries.list", e)
     return {"items": [i.model_dump(by_alias=True) for i in items], "total": len(items)}
 
 
@@ -51,7 +47,5 @@ async def delete_itinerary(itinerary_id: int, user: dict = Depends(get_current_u
     try:
         await itin_db.delete_itinerary(user["id"], itinerary_id)
     except Exception as e:
-        err_id = uuid.uuid4().hex[:8]
-        print(f"[itineraries] delete error_id={err_id} {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"delete itinerary failed (id={err_id})")
+        raise tracked_500("itineraries.delete", e)
     return {"ok": True}

@@ -60,7 +60,8 @@ async def api_run(payload: dict = Body(default={}), _: None = Depends(_require_w
     if suite not in ("general", "itinerary", "both"):
         return JSONResponse({"error": "suite không hợp lệ"}, status_code=400)
     enable_judge = bool(payload.get("enable_judge", True))
-    asyncio.create_task(runner.run_eval(suite=suite, enable_judge=enable_judge))
+    task = asyncio.create_task(runner.run_eval(suite=suite, enable_judge=enable_judge))
+    task.add_done_callback(runner.on_eval_task_done)  # không để lỗi task chết im lặng
     return {"started": True}
 
 

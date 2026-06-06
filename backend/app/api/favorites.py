@@ -1,9 +1,9 @@
 from __future__ import annotations
-import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from app.api.deps import get_current_user
+from app.api._errors import tracked_500
 from app.db import favorites as fav_db
 from app.rag.schemas import FavoriteCreate, FavoriteEntity
 
@@ -19,9 +19,7 @@ async def add_favorite(body: FavoriteCreate, user: dict = Depends(get_current_us
             user["id"], body.point_id, body.collection, body.snapshot
         )
     except Exception as e:
-        err_id = uuid.uuid4().hex[:8]
-        print(f"[favorites] add error_id={err_id} {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"add favorite failed (id={err_id})")
+        raise tracked_500("favorites.add", e)
 
 
 @router.get("/api/favorites")
@@ -29,9 +27,7 @@ async def list_favorites(user: dict = Depends(get_current_user)):
     try:
         items = await fav_db.list_favorites(user["id"])
     except Exception as e:
-        err_id = uuid.uuid4().hex[:8]
-        print(f"[favorites] list error_id={err_id} {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"list favorites failed (id={err_id})")
+        raise tracked_500("favorites.list", e)
     return {"items": [i.model_dump(by_alias=True) for i in items], "total": len(items)}
 
 
@@ -40,7 +36,5 @@ async def delete_favorite(favorite_id: int, user: dict = Depends(get_current_use
     try:
         await fav_db.delete_favorite(user["id"], favorite_id)
     except Exception as e:
-        err_id = uuid.uuid4().hex[:8]
-        print(f"[favorites] delete error_id={err_id} {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"delete favorite failed (id={err_id})")
+        raise tracked_500("favorites.delete", e)
     return {"ok": True}

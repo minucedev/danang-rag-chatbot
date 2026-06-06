@@ -20,9 +20,11 @@ def test_parse_json_with_surrounding_prose():
     assert judge._parse_json(raw) == {"faithfulness": 4, "relevance": 4, "accuracy": 4}
 
 
-def test_parse_garbage_returns_none(capsys):
-    assert judge._parse_json("không có JSON ở đây") is None
-    assert "không parse được JSON" in capsys.readouterr().out
+def test_parse_garbage_returns_none(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="app.metrics.judge"):
+        assert judge._parse_json("không có JSON ở đây") is None
+    assert "không parse được JSON" in caplog.text
 
 
 def test_parse_empty_returns_none():

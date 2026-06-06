@@ -45,16 +45,18 @@ def test_list_runs_sorted_newest_first(tmp_runs):
     assert [r["created_at"] for r in runs] == [3000, 2000, 1000]
 
 
-def test_list_runs_skips_corrupt(tmp_runs, capsys):
+def test_list_runs_skips_corrupt(tmp_runs, caplog):
+    import logging
     store.save_run(_result("20260606-101010", 1000))
     # Tạo 1 run hỏng: thư mục có result.json không phải JSON hợp lệ
     bad = tmp_runs / "20260606-999999"
     bad.mkdir(parents=True)
     (bad / "result.json").write_text("{ this is not json", encoding="utf-8")
 
-    runs = store.list_runs()
+    with caplog.at_level(logging.WARNING, logger="app.metrics.store"):
+        runs = store.list_runs()
     assert [r["id"] for r in runs] == ["20260606-101010"]
-    assert "bỏ qua run hỏng" in capsys.readouterr().out
+    assert "bỏ qua run hỏng" in caplog.text
 
 
 @pytest.mark.parametrize("bad_id", ["../../etc", "..", "a/b", "foo bar", "', ;", ""])

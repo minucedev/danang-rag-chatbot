@@ -100,6 +100,13 @@ def stable_review_id(hotel_id: str, reviewer: str, review_date: str, review_text
     digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
     return f"review_{digest}"
 
+def stable_room_id(hotel_id: str, room_name: str, bed_type: str, area, view: str) -> str:
+    """ID phòng ổn định theo nội dung — crawl lại cùng phòng KHÔNG sinh point Qdrant trùng.
+    ingest dựng doc_id = stable_uuid(["accommodation_room", hid, room_id]) (ingest.py)."""
+    raw = "||".join(str(x) for x in [hotel_id, room_name, bed_type, area, view])
+    digest = hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
+    return f"room_{digest}"
+
 def strip_html_tags(text: Optional[str], default: str = "") -> str:
     if text is None:
         return default
@@ -2684,14 +2691,15 @@ class BookingCrawlerEngine:
                     view = token
                     break
 
-            room_id = str(uuid.uuid4())
+            area_val = self.clean_float(area_match.group(1)) if area_match else "N/A"
+            room_id = stable_room_id(hotel_id, room_name, bed_type, area_val, view)
             room_item = {
                 "room_id": room_id,
                 "hotel_id": hotel_id,
                 "room_name": room_name,
                 "capacity": capacity_match.group(1) if capacity_match else occupancy,
                 "bed_type": bed_type,
-                "area": self.clean_float(area_match.group(1)) if area_match else "N/A",
+                "area": area_val,
                 "view": view,
                 "amenities_room": text,
             }
@@ -2961,7 +2969,7 @@ class BookingCrawlerEngine:
             room_records, price_records = self.crawl_rooms_and_prices(detail_page, hotel["hotel_id"])
             if not room_records:
                 fallback_room = {
-                    "room_id": str(uuid.uuid4()),
+                    "room_id": stable_room_id(hotel["hotel_id"], "Standard Room", "N/A", "N/A", "N/A"),
                     "hotel_id": hotel["hotel_id"],
                     "room_name": "Standard Room",
                     "capacity": "N/A",

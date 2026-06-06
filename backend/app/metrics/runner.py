@@ -5,13 +5,16 @@ Chạy tuần tự từng query (qua `evaluator.run_query`), tính metric, phát
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import time
-import traceback
 from typing import Any, Dict, List, Optional
 
 from . import evaluator, judge, store
 from .benchmark import BENCHMARK, BENCHMARK_ITINERARY
 from .progress import progress_bus
+
+logger = logging.getLogger("app.metrics.runner")
 
 # State module-level (chạy trên asyncio loop đơn luồng — không cần lock).
 _state: Dict[str, Any] = {
@@ -42,7 +45,23 @@ def _log(msg: str) -> None:
 
 def _get_pipeline():
     from app.rag import pipeline as pl_module
-    return pl_module._pipeline_instance
+    # getattr default: ở admin-only / trước khi main.py gán, biến chưa tồn tại → trả None
+    # để nhánh "Pipeline chưa sẵn sàng" báo rõ thay vì AttributeError chết im lặng.
+    return getattr(pl_module, "_pipeline_instance", None)
+
+
+def on_eval_task_done(task: "asyncio.Task") -> None:
+    """Backstop cho `asyncio.create_task(run_eval(...))`: nếu run_eval thoát bằng exception
+    (vd lỗi trong phần setup TRƯỚC khối try) thì không bị nuốt im lặng — log đầy đủ, báo ra
+    dashboard, và GỠ KẸT cờ running để lượt eval sau còn chạy được."""
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        logger.error("[metrics.runner] run_eval task crashed", exc_info=exc)
+        _log(f"❌ Eval lỗi nghiêm trọng: {type(exc).__name__}: {exc}")
+        _state.update(running=False, current=0, total=0)
 
 
 async def run_eval(suite: str = "both", enable_judge: bool = True) -> Optional[Dict[str, Any]]:
@@ -55,7 +74,7 @@ async def run_eval(suite: str = "both", enable_judge: bool = True) -> Optional[D
 
     pipeline = _get_pipeline()
     if pipeline is None:
-        _log("❌ Pipeline chưa sẵn sàng (model chưa load xong).")
+        _log("❌ Pipeline chưa sẵn sàng (model chưa load — hoặc đang chạy chế độ admin-only).")
         return None
 
     general_items = BENCHMARK if suite in ("general", "both") else []
@@ -215,7 +234,7 @@ async def run_eval(suite: str = "both", enable_judge: bool = True) -> Optional[D
 
     except Exception as exc:  # noqa: BLE001 — báo lỗi ra dashboard, không nuốt im lặng
         _log(f"❌ Lỗi khi eval: {type(exc).__name__}: {exc}")
-        traceback.print_exc()
+        logger.exception("[metrics.runner] eval failed")
         return None
     finally:
         _state.update(running=False, current=0, total=0)

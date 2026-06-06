@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import json
+import logging
 import threading
 import time
 import uuid
@@ -14,6 +15,7 @@ from app.rag.schemas import ChatRequest
 from app.db import sessions as db
 from app import config
 
+logger = logging.getLogger("app.api.chat")
 router = APIRouter()
 
 # Single GPU — only one generation at a time
@@ -143,7 +145,7 @@ async def _event_stream(
         # Tracked error: trả về error_id cho user, log đầy đủ phía server (không
         # leak `str(exc)` cho client — exception text có thể chứa path/stack-trace).
         err_id = uuid.uuid4().hex[:8]
-        print(f"[chat-stream] error_id={err_id} {type(exc).__name__}: {exc}")
+        logger.error("[chat-stream] error_id=%s: %s: %s", err_id, type(exc).__name__, exc, exc_info=exc)
         yield {"event": "error", "data": json.dumps({
             "message": f"Lỗi xử lý (id={err_id})",
             "error_id": err_id,
@@ -173,9 +175,9 @@ async def _event_stream(
                 )
                 await db._db_conn().commit()
         except Exception as persist_exc:
-            print(
-                f"[chat-stream] persist failed: "
-                f"{type(persist_exc).__name__}: {persist_exc}"
+            logger.error(
+                "[chat-stream] persist failed: %s: %s",
+                type(persist_exc).__name__, persist_exc, exc_info=persist_exc,
             )
 
 

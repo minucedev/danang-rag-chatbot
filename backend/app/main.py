@@ -21,6 +21,13 @@ os.environ.setdefault(
 )
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
+# Logging có cấu trúc dùng chung (thay print rải rác ở đường lỗi). Level qua env LOG_LEVEL.
+import logging
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -91,6 +98,7 @@ async def _scheduled_crawl_admin() -> None:
 
 from app.api import chat, sessions, health, profile, recommend, admin, events, favorites, itineraries
 from app.api import auth as auth_api
+from app.api import admin_shell
 from app.api import crawl_admin as crawl_admin_api
 from app.api import metrics_admin
 
@@ -222,6 +230,7 @@ app.include_router(admin.router)
 app.include_router(events.router)
 app.include_router(favorites.router)
 app.include_router(itineraries.router)
+app.include_router(admin_shell.router)
 app.include_router(crawl_admin_api.router)
 app.include_router(metrics_admin.router)
 

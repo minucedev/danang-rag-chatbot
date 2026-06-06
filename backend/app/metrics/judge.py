@@ -8,12 +8,15 @@ Judge là TÙY CHỌN: thiếu GEMINI_API_KEY hoặc lỗi → trả None, eval 
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 from typing import Dict, Optional
 
 from app import config
 from app.rag.gemini_fallback import GeminiFallbackError, generate_gemini_streaming
+
+logger = logging.getLogger("app.metrics.judge")
 
 GENERAL_JUDGE_PROMPT = """Bạn là giám khảo đánh giá câu trả lời của chatbot du lịch Đà Nẵng.
 
@@ -64,7 +67,7 @@ def _parse_json(text: str) -> Optional[Dict]:
         return json.loads(text)
     except json.JSONDecodeError:
         # Judge trả về sai định dạng → bỏ điểm câu này; log preview để chẩn đoán.
-        print(f"[metrics.judge] không parse được JSON từ judge: {text[:120]!r}")
+        logger.warning("[metrics.judge] không parse được JSON từ judge: %r", text[:120])
         return None
 
 
@@ -84,7 +87,7 @@ async def _gemini_complete(prompt: str, max_tokens: int = 300) -> Optional[str]:
     except GeminiFallbackError as exc:
         # Judge tùy chọn — vẫn degrade về None, nhưng để dấu vết phân biệt "Gemini lỗi"
         # với "judge tắt" (cả hai đều trả None nên cột judge trống khó chẩn đoán).
-        print(f"[metrics.judge] Gemini judge thất bại: {type(exc).__name__}: {exc}")
+        logger.warning("[metrics.judge] Gemini judge thất bại: %s: %s", type(exc).__name__, exc)
         return None
     return "".join(parts)
 
