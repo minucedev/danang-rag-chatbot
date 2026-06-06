@@ -1,77 +1,50 @@
-"""FastAPI server cho crawl-admin đa-engine (standalone, port 8100).
+"""Router crawl-admin — gắn vào app chính tại /admin/crawl (thay crawl/app/server.py cũ).
 
-Chạy:  cd crawl && uvicorn app.server:app --port 8100 --reload
+Phục vụ dashboard Jinja + các API điều khiển crawl/ingest. Dùng chung process, embedder,
+Qdrant với chatbot. Static (style.css) được mount ở main.py.
 """
 from __future__ import annotations
-import sys
-
-# stdout/stderr → UTF-8: tránh UnicodeEncodeError khi print() tiếng Việt trên console Windows (cp1252)
-for _s in (sys.stdout, sys.stderr):
-    try:
-        _s.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, ValueError):
-        pass
-
 import asyncio
 import logging
-from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Form
+from fastapi import APIRouter, Depends, Form, Header, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
-from fastapi.staticfiles import StaticFiles
+from app import config as backend_config
+from app.crawl_admin import config, db, orchestrator
+from app.crawl_admin.engines import ENGINES, CRAWL_KEYS
+from app.crawl_admin.logbus import log_bus
 
-from app import config, db, orchestrator
-from app.engines import ENGINES, CRAWL_KEYS
-from app.logbus import log_bus
+router = APIRouter(prefix="/admin/crawl", tags=["crawl-admin"])
 
-_TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+_TEMPLATES = Jinja2Templates(
+    directory=str(Path(__file__).resolve().parent.parent / "crawl_admin" / "templates")
+)
 
 
-async def _scheduled_run() -> None:
-    if orchestrator.is_running():
+def _require_write_auth(x_admin_token: str | None = Header(default=None)) -> None:
+    """Dashboard nằm trên cổng public 8000. Khi CRAWL_ADMIN_REQUIRE_TOKEN bật, các route
+    GHI (kích hoạt crawl, thêm/xóa nguồn) phải kèm header x-admin-token khớp ADMIN_TOKEN."""
+    if not config.REQUIRE_TOKEN:
         return
-    try:
-        await orchestrator.run_engines(CRAWL_KEYS, trigger="scheduled", force=False)
-    except Exception as exc:
-        print(f"[crawl-admin] scheduled run failed: {type(exc).__name__}: {exc}")
+    if not backend_config.ADMIN_TOKEN or x_admin_token != backend_config.ADMIN_TOKEN:
+        raise HTTPException(status_code=503, detail="Crawl admin write disabled or bad token")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await db.init_db()
-    scheduler = None
-    if config.SCHEDULE_ENABLED:
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler
-        scheduler = AsyncIOScheduler()
-        scheduler.add_job(_scheduled_run, "interval", hours=config.SCHEDULE_HOURS,
-                          id="auto_crawl", max_instances=1, coalesce=True)
-        scheduler.start()
-        print(f"[crawl-admin] scheduler ON — mỗi {config.SCHEDULE_HOURS}h")
-    yield
-    if scheduler is not None:
-        scheduler.shutdown(wait=False)
-    await db.close_db()
-
-
-app = FastAPI(title="Crawl Admin", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
-
-
-@app.get("/", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return _TEMPLATES.TemplateResponse(request, "index.html", {})
 
 
-@app.get("/api/state")
+@router.get("/api/state")
 async def api_state():
     return {"state": orchestrator.get_state(), "latest_run": await db.get_latest_run()}
 
 
-@app.get("/api/jobs")
+@router.get("/api/jobs")
 async def api_jobs():
     state = orchestrator.get_state()
     eng_state = await db.list_engine_state()
@@ -88,8 +61,8 @@ async def api_jobs():
     return out
 
 
-@app.post("/api/jobs/{key}/run")
-async def api_job_run(key: str):
+@router.post("/api/jobs/{key}/run")
+async def api_job_run(key: str, _: None = Depends(_require_write_auth)):
     if key not in ENGINES:
         return JSONResponse({"error": "engine không tồn tại"}, status_code=404)
     if orchestrator.is_running():
@@ -98,8 +71,8 @@ async def api_job_run(key: str):
     return {"started": True}
 
 
-@app.post("/api/jobs/run-all")
-async def api_run_all():
+@router.post("/api/jobs/run-all")
+async def api_run_all(_: None = Depends(_require_write_auth)):
     if orchestrator.is_running():
         return JSONResponse({"error": "Đang có một lượt crawl chạy."}, status_code=409)
     asyncio.create_task(_bg(CRAWL_KEYS, force=False))
@@ -113,20 +86,19 @@ async def _bg(keys: list[str], force: bool) -> None:
         print(f"[crawl-admin] run failed: {type(exc).__name__}: {exc}")
 
 
-@app.get("/api/runs")
+@router.get("/api/runs")
 async def api_runs():
     return await db.list_runs(limit=20)
 
 
-@app.get("/api/entities")
+@router.get("/api/entities")
 async def api_entities():
     return await db.list_entities()
 
 
-@app.get("/api/hotels")
+@router.get("/api/hotels")
 async def api_hotels():
     import pandas as pd
-    from pathlib import Path
     out = []
     # 1. Thử đọc Traveloka hotels
     traveloka_path = Path(config.DATA_TRAVELOKA) / "hotels.csv"
@@ -163,13 +135,16 @@ async def api_hotels():
 
 
 # ─── Sources (URL Foody thêm tay, tùy chọn) ──────────────────────────────────
-@app.get("/api/sources")
+@router.get("/api/sources")
 async def api_sources():
     return await db.list_sources()
 
 
-@app.post("/api/sources")
-async def api_add_source(url: str = Form(...), category: str = Form(""), label: str = Form("")):
+@router.post("/api/sources")
+async def api_add_source(
+    url: str = Form(...), category: str = Form(""), label: str = Form(""),
+    _: None = Depends(_require_write_auth),
+):
     url = url.strip()
     if not url.startswith("http"):
         return JSONResponse({"error": "URL không hợp lệ"}, status_code=400)
@@ -177,14 +152,14 @@ async def api_add_source(url: str = Form(...), category: str = Form(""), label: 
     return {"ok": True}
 
 
-@app.post("/api/sources/{source_id}/delete")
-async def api_delete_source(source_id: int):
+@router.post("/api/sources/{source_id}/delete")
+async def api_delete_source(source_id: int, _: None = Depends(_require_write_auth)):
     await db.delete_source(source_id)
     return {"ok": True}
 
 
 # ─── Log realtime (SSE) ──────────────────────────────────────────────────────
-@app.get("/api/crawl/logs/stream")
+@router.get("/api/logs/stream")
 async def api_logs_stream():
     async def _gen():
         q = log_bus.subscribe()

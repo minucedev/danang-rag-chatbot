@@ -1,22 +1,22 @@
-"""Cấu hình cho tool crawl-admin standalone (độc lập với backend chính)."""
+"""Cấu hình cho module crawl-admin (chạy chung process với backend tại /admin/crawl)."""
 from __future__ import annotations
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # = crawl/
-DATA_DIR = BASE_DIR / "data"
-DB_PATH = os.getenv("CRAWL_DB_PATH", str(DATA_DIR / "crawl.db"))
+# __file__ = backend/app/crawl_admin/config.py → parents[2] = backend/
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+DATA_DIR = BACKEND_DIR / "crawl_data"   # output CSV của các engine
+DB_PATH = os.getenv("CRAWL_DB_PATH", str(BACKEND_DIR / "data" / "crawl.db"))
 
 # ── Qdrant ingest: dùng chung Qdrant + model embed với app chính ──────────────
-# Nạp creds Qdrant từ backend/.env (điểm tích hợp duy nhất với app chính).
-_BACKEND = BASE_DIR.parent / "backend"
+# Nạp creds Qdrant từ backend/.env (no-op nếu backend/main.py đã nạp trước).
 try:
     from dotenv import load_dotenv
-    load_dotenv(_BACKEND / ".env")
+    load_dotenv(BACKEND_DIR / ".env")
 except Exception:
     pass
 # Load bge-m3 offline từ cache local của backend (tránh gọi mạng HuggingFace)
-os.environ.setdefault("HF_HUB_CACHE", str(_BACKEND / "models" / ".cache" / "huggingface"))
+os.environ.setdefault("HF_HUB_CACHE", str(BACKEND_DIR / "models" / ".cache" / "huggingface"))
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 QDRANT_URL = os.getenv("QDRANT_URL", "")
@@ -56,8 +56,9 @@ DISCOVERY_PAGE_COUNT = int(os.getenv("CRAWL_DISCOVERY_PAGE_COUNT", "24"))
 DISCOVERY_MAX_PAGES = int(os.getenv("CRAWL_DISCOVERY_MAX_PAGES", "30"))  # trần an toàn
 DISCOVERY_PAGE_DELAY = float(os.getenv("CRAWL_DISCOVERY_PAGE_DELAY", "0.6"))
 
-# Scheduler — tự chạy crawl định kỳ
-SCHEDULE_ENABLED = os.getenv("CRAWL_SCHEDULE_ENABLED", "true").lower() in ("1", "true", "yes")
+# Scheduler — tự chạy crawl định kỳ. MẶC ĐỊNH TẮT: chạy chung process với chatbot trên
+# máy ~4GB RAM → chỉ crawl thủ công qua nút bấm. Bật lại bằng CRAWL_SCHEDULE_ENABLED=true.
+SCHEDULE_ENABLED = os.getenv("CRAWL_SCHEDULE_ENABLED", "false").lower() in ("1", "true", "yes")
 SCHEDULE_HOURS = int(os.getenv("CRAWL_SCHEDULE_HOURS", "24"))
 # Freshness theo engine: bỏ qua engine vừa chạy < ngần này giờ (scheduler/Chạy tất cả)
 JOB_FRESHNESS_HOURS = int(os.getenv("CRAWL_JOB_FRESHNESS_HOURS", "20"))
@@ -76,5 +77,6 @@ DATA_FOODY = str(DATA_DIR / "foody")
 DATA_TRAVELOKA = str(DATA_DIR / "traveloka")
 DATA_BOOKING = str(DATA_DIR / "booking")
 
-# Server
-PORT = int(os.getenv("CRAWL_PORT", "8100"))
+# Dashboard giờ nằm trên cổng public 8000. Bật cờ này để yêu cầu x-admin-token (= ADMIN_TOKEN
+# của backend) cho các route GHI (kích hoạt crawl, thêm/xóa nguồn). Mặc định MỞ cho dev tiện.
+REQUIRE_TOKEN = os.getenv("CRAWL_ADMIN_REQUIRE_TOKEN", "false").lower() in ("1", "true", "yes")

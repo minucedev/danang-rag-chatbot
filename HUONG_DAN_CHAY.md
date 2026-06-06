@@ -66,6 +66,7 @@ python -m venv .venv
 pip install --upgrade pip
 pip install torch                       # bản CPU là đủ (KHÔNG cần --index-url cu121)
 pip install -r backend\requirements.txt
+playwright install chromium             # 1 lần — cho dashboard crawl (mục 7)
 
 # Khởi động server
 cd backend
@@ -129,6 +130,26 @@ curl -X POST http://localhost:8000/api/admin/crawl/places `
   -H "Content-Type: application/json" `
   -d '{\"missed_only\": true}'
 ```
+
+---
+
+## 7. Crawl Admin Dashboard (đã gộp vào backend)
+
+Tool crawl Foody/Traveloka/Booking trước đây chạy riêng ở cổng 8100, **nay nằm chung trong backend**.
+Không cần chạy lệnh thứ hai — khi backend bật là dashboard có sẵn:
+
+**http://localhost:8000/admin/crawl/**
+
+- Bấm nút **▶ Chạy** từng engine hoặc **▶ Chạy tất cả** để crawl thủ công; log realtime + lịch sử hiện ngay trên trang.
+- Ingest đẩy dữ liệu lên Qdrant, **dùng chung embedder BGE-M3** với chatbot (không tốn thêm ~2GB RAM).
+- CSV xuất ở `backend/crawl_data/`, SQLite riêng ở `backend/data/crawl.db`.
+
+> **Auto-crawl MẶC ĐỊNH TẮT** (máy ~4GB RAM, tránh OOM khi Playwright + chatbot chạy cùng lúc).
+> Bật lịch tự động: đặt `CRAWL_SCHEDULE_ENABLED=true` trong `backend\.env`.
+> Cần bảo vệ các nút crawl trên cổng public: đặt `CRAWL_ADMIN_REQUIRE_TOKEN=true` + `ADMIN_TOKEN=...`
+> (khi đó các thao tác ghi cần header `X-Admin-Token`).
+
+Seed dữ liệu ban đầu từ `raw_data/` (tuỳ chọn): `python backend/scripts/seed.py`.
 
 ---
 

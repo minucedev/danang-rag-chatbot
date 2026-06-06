@@ -7,7 +7,7 @@ from typing import Optional
 
 import aiosqlite
 
-from app import config
+from app.crawl_admin import config
 
 _db: Optional[aiosqlite.Connection] = None
 # Serialize execute+commit: engine foody ghi đồng thời (asyncio.gather nhiều worker) trên

@@ -2,12 +2,13 @@
 
 Port từ qdrant-etl.ipynb (helpers + build_* + ensure/upsert), chỉnh:
 - recreate=False (chỉ tạo collection khi thiếu, KHÔNG xoá → giữ places/dữ liệu cũ);
-- đọc CSV từ crawl/data/{foody,traveloka,booking};
+- đọc CSV từ backend/crawl_data/{foody,traveloka,booking};
 - embed bge-m3 (lazy, CPU); Qdrant client sync.
 Phạm vi: restaurants (Foody) + accommodation hotels/rooms/reviews (Traveloka+Booking).
 """
 from __future__ import annotations
 import hashlib
+import logging
 import re
 import unicodedata
 import uuid
@@ -20,7 +21,7 @@ from qdrant_client.http.models import (
     Distance, PayloadSchemaType, PointStruct, VectorParams,
 )
 
-from app import config
+from app.crawl_admin import config
 
 _ws_re = re.compile(r"\s+")
 _embedder = None
@@ -584,11 +585,36 @@ def _concat(dirs: list[str], fname: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-def _get_embedder():
+def set_shared_embedder(model) -> None:
+    """App chính inject embedder BGE-M3 đã nạp sẵn để KHÔNG nạp model lần 2 (~2GB RAM)."""
     global _embedder
-    if _embedder is None:
-        from sentence_transformers import SentenceTransformer
-        _embedder = SentenceTransformer(config.EMBED_MODEL_NAME, device="cpu")
+    _embedder = model
+
+
+def _get_embedder():
+    """Ưu tiên: (1) embedder được inject/cache; (2) embedder của RAGPipeline đang chạy
+    (khi crawl-admin chạy chung process với chatbot); (3) fallback nạp mới cho test/CLI."""
+    global _embedder
+    if _embedder is not None:
+        return _embedder
+    try:
+        import app.rag.pipeline as pl_module
+        pipeline = getattr(pl_module, "_pipeline_instance", None)
+        if pipeline is not None and getattr(pipeline, "encoder", None) is not None:
+            _embedder = pipeline.encoder
+            return _embedder
+    except Exception as exc:
+        # Không nuốt im lặng: nếu tra encoder của pipeline lỗi thì bước fallback dưới sẽ
+        # nạp BGE-M3 lần 2 (~2GB) — đúng thứ merge muốn tránh. Log để còn lần ra.
+        logging.warning("[crawl-admin] tra shared embedder lỗi: %s: %s",
+                        type(exc).__name__, exc)
+    # Trong process backend đã gộp, set_shared_embedder() chạy lúc startup nên KHÔNG bao giờ
+    # tới đây. Tới đây = (CLI/test) hoặc misconfig → cảnh báo vì sắp nạp model thứ 2.
+    logging.warning("[crawl-admin] chưa có shared embedder — nạp MỚI %s (~2GB CPU). "
+                    "Trong backend gộp điều này không nên xảy ra (kiểm tra set_shared_embedder).",
+                    config.EMBED_MODEL_NAME)
+    from sentence_transformers import SentenceTransformer
+    _embedder = SentenceTransformer(config.EMBED_MODEL_NAME, device="cpu")
     return _embedder
 
 

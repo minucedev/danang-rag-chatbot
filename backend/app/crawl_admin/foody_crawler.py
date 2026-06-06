@@ -11,7 +11,7 @@ from typing import Optional
 
 from playwright.async_api import Browser, Page
 
-from app import config
+from app.crawl_admin import config
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -165,7 +165,7 @@ async def crawl_detail_with_reviews(page: Page, url: str, review_limit: int, las
     Trả (detail_dict, reviews_list). reviews_list có thể rỗng nếu review_limit<=0
     hoặc không load được review.
     """
-    from app import foody_review_crawler
+    from app.crawl_admin import foody_review_crawler
     from datetime import datetime
 
     last_crawl_dt = None
@@ -202,7 +202,7 @@ async def crawl_detail_with_reviews(page: Page, url: str, review_limit: int, las
                 time_text = await safe("div.ru-stats > span")
 
                 if last_crawl_dt:
-                    from app.review_preprocessor import parse_time
+                    from app.crawl_admin.review_preprocessor import parse_time
                     parsed_time = parse_time(time_text)
                     if parsed_time and parsed_time < last_crawl_dt:
                         continue

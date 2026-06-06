@@ -1,7 +1,7 @@
-"""Script seed dữ liệu crawl ban đầu từ thư mục raw_data/ vào SQLite database và các file CSV local của crawl-admin.
+"""Script seed dữ liệu crawl ban đầu từ raw_data/ vào SQLite (entities, engine_state, crawl_runs) của crawl-admin.
 
 Chạy:
-  python crawl/seed.py
+  python backend/scripts/seed.py
 """
 import sys
 
@@ -21,12 +21,12 @@ import sqlite3
 import time
 from pathlib import Path
 
-# Cấu hình đường dẫn và tham số
-BASE_DIR = Path(__file__).resolve().parent
-ROOT_DIR = BASE_DIR.parent
+# Cấu hình đường dẫn và tham số (sau khi gộp: file ở backend/scripts/)
+BACKEND_DIR = Path(__file__).resolve().parents[1]   # = backend/
+ROOT_DIR = BACKEND_DIR.parent                        # = gốc repo
 RAW_DATA_DIR = ROOT_DIR / "raw_data"
-DATA_DIR = BASE_DIR / "data"
-DB_PATH = DATA_DIR / "crawl.db"
+DATA_DIR = BACKEND_DIR / "crawl_data"                # khớp crawl_admin/config.DATA_DIR
+DB_PATH = BACKEND_DIR / "data" / "crawl.db"          # khớp crawl_admin/config.DB_PATH
 
 # Thư mục đích cho CSV
 DATA_FOODY = DATA_DIR / "foody"
@@ -52,7 +52,8 @@ def extract_district(address: str) -> str:
 def seed_database():
     print("=== Khởi tạo CSDL SQLite ===")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
     # Kết nối SQLite
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -62,7 +63,7 @@ def seed_database():
     last_crawl_time = now - (LAST_CRAWL_AT_DAYS_AGO * 24 * 3600)
     
     # Chạy schema.sql để tạo cấu trúc bảng nếu chưa có
-    schema_path = BASE_DIR / "app" / "schema.sql"
+    schema_path = BACKEND_DIR / "app" / "crawl_admin" / "schema.sql"
     if schema_path.exists():
         schema = schema_path.read_text(encoding="utf-8")
         cursor.executescript(schema)

@@ -8,7 +8,7 @@ import asyncio
 
 import httpx
 
-from app import config
+from app.crawl_admin import config
 
 _API = "https://www.foody.vn/__get/Place/HomeListPlace"
 _HEADERS = {

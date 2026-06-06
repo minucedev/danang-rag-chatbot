@@ -15,8 +15,8 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-from app import config, db, discover, foody_crawler, foody_review_crawler, ingest, review_preprocessor
-from app.logbus import log_bus
+from app.crawl_admin import config, db, discover, foody_crawler, foody_review_crawler, ingest, review_preprocessor
+from app.crawl_admin.logbus import log_bus
 
 _VN_DISTRICTS = {
     "hải châu": "Hải Châu", "sơn trà": "Sơn Trà", "thanh khê": "Thanh Khê",
@@ -207,7 +207,7 @@ class _BusLogHandler(logging.Handler):
 
 
 def _make_traveloka():
-    from app.engines.hotel_crawler import TravelokaCrawlerEngine
+    from app.crawl_admin.engines.hotel_crawler import TravelokaCrawlerEngine
     return TravelokaCrawlerEngine(
         headless=config.TRAVELOKA_HEADLESS,
         max_pages=config.TRAVELOKA_MAX_PAGES,
@@ -218,7 +218,7 @@ def _make_traveloka():
 
 
 def _make_booking():
-    from app.engines.hotel_crawler import BookingCrawlerEngine
+    from app.crawl_admin.engines.hotel_crawler import BookingCrawlerEngine
     return BookingCrawlerEngine(
         headless=config.BOOKING_HEADLESS,
         max_pages=config.BOOKING_MAX_PAGES,

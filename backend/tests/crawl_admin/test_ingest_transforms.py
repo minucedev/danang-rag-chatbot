@@ -3,8 +3,8 @@ Không cần Playwright/network/Qdrant/embedder."""
 from __future__ import annotations
 import pandas as pd
 
-from app import ingest
-from app import foody_review_crawler
+from app.crawl_admin import ingest
+from app.crawl_admin import foody_review_crawler
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

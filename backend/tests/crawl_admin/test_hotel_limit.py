@@ -3,7 +3,7 @@ Lõi: limit đếm theo số KS cào THÀNH CÔNG (crawled_urls); KS bị skip d
 Không cần Playwright/network — chỉ gọi thẳng method, crawl_detail được monkeypatch."""
 from __future__ import annotations
 
-from app.engines.hotel_crawler import TravelokaCrawlerEngine
+from app.crawl_admin.engines.hotel_crawler import TravelokaCrawlerEngine
 
 
 def _make_engine(tmp_path, max_hotels):

@@ -14,8 +14,8 @@ import pytest_asyncio
 @pytest_asyncio.fixture
 async def tmp_db(monkeypatch):
     """SQLite tạm + init schema; dọn sau test."""
-    from app import config
-    from app import db
+    from app.crawl_admin import config
+    from app.crawl_admin import db
 
     tmp_dir = tempfile.mkdtemp()
     monkeypatch.setattr(config, "DB_PATH", str(Path(tmp_dir) / "test.db"))

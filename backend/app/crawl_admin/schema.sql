@@ -1,4 +1,4 @@
--- Schema cho tool crawl-admin (SQLite riêng: crawl/data/crawl.db)
+-- Schema cho crawl-admin (SQLite: backend/data/crawl.db, xem crawl_admin/config.DB_PATH)
 
 -- Danh sách URL nguồn được quản lý qua UI (v1: URL trang chi tiết entity Foody)
 CREATE TABLE IF NOT EXISTS sources (

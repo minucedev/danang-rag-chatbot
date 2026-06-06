@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Optional
 
-from app import config
+from app.crawl_admin import config
 
 if TYPE_CHECKING:  # chỉ dùng cho type hint — tránh buộc test thuần phải cài Playwright
     from playwright.async_api import Page
@@ -112,7 +112,7 @@ async def crawl_reviews(page: Page, url: str, limit: int, last_crawl_at: Optiona
         time_text = await safe("div.ru-stats > span")
 
         if last_crawl_dt:
-            from app.review_preprocessor import parse_time
+            from app.crawl_admin.review_preprocessor import parse_time
             parsed_time = parse_time(time_text)
             if parsed_time and parsed_time < last_crawl_dt:
                 continue

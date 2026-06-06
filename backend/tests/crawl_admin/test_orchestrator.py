@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from app import config, orchestrator
+from app.crawl_admin import config, orchestrator
 
 
 @pytest.fixture
@@ -76,7 +76,7 @@ async def test_run_ctx_stores_force():
 
 
 async def test_hotel_runner_registers_callbacks(tmp_db, monkeypatch):
-    from app.engines import _hotel_runner
+    from app.crawl_admin.engines import _hotel_runner
     
     mock_engine_instance = type("MockEngine", (), {"run": lambda self: None})()
     runner = _hotel_runner(lambda: mock_engine_instance, "/tmp/dummy", "traveloka")
