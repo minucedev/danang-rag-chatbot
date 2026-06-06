@@ -96,6 +96,14 @@ TOP_K_RETRIEVE: int = int(os.getenv("TOP_K_RETRIEVE", "15"))
 TOP_K_RERANK: int = int(os.getenv("TOP_K_RERANK", "5"))
 RERANK_SCORE_THRESHOLD: float = float(os.getenv("RERANK_SCORE_THRESHOLD", "0.3"))
 
+# Semantic QA cache — câu hỏi gần trùng câu đã trả lời tốt → trả lại ngay, bỏ qua Gemini
+# (giảm chi phí/độ trễ + bớt fallback). Chỉ cache câu có dữ liệu nội bộ (grounded), không cá nhân hoá.
+QA_CACHE_ENABLED: bool = os.getenv("QA_CACHE_ENABLED", "true").lower() in ("1", "true", "yes")
+QA_CACHE_SIM_THRESHOLD: float = float(os.getenv("QA_CACHE_SIM_THRESHOLD", "0.93"))  # cosine, ngưỡng cao
+QA_CACHE_TTL_DAYS: int = int(os.getenv("QA_CACHE_TTL_DAYS", "7"))
+QA_CACHE_MAX_ROWS: int = int(os.getenv("QA_CACHE_MAX_ROWS", "500"))
+QA_CACHE_NOTE: bool = os.getenv("QA_CACHE_NOTE", "true").lower() in ("1", "true", "yes")
+
 # Synthesizer / analyzer (ported từ notebook Kaggle)
 MAX_CONTEXT_CHARS: int = int(os.getenv("MAX_CONTEXT_CHARS", "4000"))
 MAX_ALTERNATIVES: int = int(os.getenv("MAX_ALTERNATIVES", "3"))

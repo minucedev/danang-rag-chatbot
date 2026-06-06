@@ -74,6 +74,23 @@ CREATE TABLE IF NOT EXISTS session_context (
     updated_at   INTEGER NOT NULL
 );
 
+-- Cache câu trả lời theo độ tương đồng ngữ nghĩa: câu hỏi gần trùng câu đã trả lời tốt
+-- (grounded) → trả lại ngay, bỏ qua Gemini. question_vec = embedding BGE-M3 (float32, 1024).
+CREATE TABLE IF NOT EXISTS qa_cache (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    question      TEXT    NOT NULL,
+    question_vec  BLOB    NOT NULL,
+    answer        TEXT    NOT NULL,
+    intent        TEXT    NOT NULL,
+    filters_json  TEXT,
+    sources_json  TEXT,
+    created_at    INTEGER NOT NULL,
+    last_used_at  INTEGER NOT NULL,
+    hit_count     INTEGER DEFAULT 0,
+    UNIQUE (question, intent)
+);
+CREATE INDEX IF NOT EXISTS idx_qa_cache_intent ON qa_cache(intent, created_at);
+
 CREATE TABLE IF NOT EXISTS missed_queries (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     query           TEXT    NOT NULL,
