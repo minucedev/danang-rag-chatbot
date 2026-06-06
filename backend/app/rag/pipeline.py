@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import json
 import re
 import threading
 import time
@@ -22,6 +23,7 @@ from app.rag.schemas import ChatFilters, SearchResultSchema
 from app.rag.events_retrieval import retrieve_events, format_events_context
 from app.utils.nfc import normalize_nfc
 from app.db.missed_queries import log_missed_query
+from app.db import qa_cache
 
 # Intents có thể crawl được địa điểm thực tế — log khi miss
 _CRAWLABLE_INTENTS = {
@@ -30,6 +32,30 @@ _CRAWLABLE_INTENTS = {
     QueryIntent.PLACE_SEARCH,
     QueryIntent.SPECIFIC_SEARCH,
 }
+
+# Intents được phép cache câu trả lời (tra cứu tĩnh). KHÔNG cache event/itinerary/chitchat
+# (động hoặc đã có nhánh riêng).
+_CACHEABLE_INTENTS = {
+    QueryIntent.HOTEL_SEARCH,
+    QueryIntent.RESTAURANT_SEARCH,
+    QueryIntent.PLACE_SEARCH,
+    QueryIntent.REVIEW_SEARCH,
+    QueryIntent.ROOM_SEARCH,
+    QueryIntent.PRICE_SEARCH,
+    QueryIntent.SPECIFIC_SEARCH,
+    QueryIntent.GENERAL,
+}
+
+
+async def _store_qa_cache(question, qvec, answer, intent, merged, sources) -> None:
+    """Lưu câu trả lời grounded vào cache (best-effort — lỗi cache KHÔNG ảnh hưởng câu trả lời)."""
+    try:
+        await qa_cache.store(
+            question, qvec, answer, intent.value, merged,
+            json.dumps(sources, ensure_ascii=False),
+        )
+    except Exception as exc:
+        print(f"[pipeline] qa_cache store failed: {type(exc).__name__}: {exc}")
 
 # Vietnamese few-shot examples to prevent English responses
 _FEW_SHOT = """Ví dụ:
@@ -492,6 +518,29 @@ class RAGPipeline:
         merged = _merge_filters(filters, analysis["filters"])
         merged = merge_session_prefs(session_ctx, merged)
 
+        # 2.5. Cache câu trả lời: câu gần trùng (cùng intent + filters, KHÔNG cá nhân hoá) → trả ngay,
+        #      bỏ qua retrieve + Gemini. qvec embed 1 lần, tái dùng cho cả check lẫn store grounded sau.
+        qvec = None
+        cache_ok = config.QA_CACHE_ENABLED and intent in _CACHEABLE_INTENTS and not profile_note
+        if cache_ok:
+            qvec = await loop.run_in_executor(
+                None, lambda: self.encoder.encode([q], normalize_embeddings=True)[0]
+            )
+            try:
+                hit = await qa_cache.find_similar(qvec, intent.value, merged)
+            except Exception as exc:
+                print(f"[pipeline] qa_cache lookup failed: {type(exc).__name__}: {exc}")
+                hit = None
+            if hit:
+                cached_sources = json.loads(hit["sources_json"]) if hit["sources_json"] else []
+                yield {"type": "sources", "items": cached_sources, "total": len(cached_sources)}
+                if config.QA_CACHE_NOTE:
+                    yield {"type": "token", "text": "_(Dùng lại câu trả lời tương tự đã lưu)_\n\n"}
+                yield {"type": "token", "text": hit["answer"]}
+                print(f"[TIMING] qa_cache HIT score={hit['score']:.3f} — bỏ qua Gemini")
+                yield {"type": "done"}
+                return
+
         # 3. Retrieve bằng rewritten_query với top_k cao hơn để reranker có đủ candidates
         t_retrieve_start = time.perf_counter()
         results = await retrieve_by_intent(
@@ -664,6 +713,11 @@ class RAGPipeline:
                     yield {"type": "token", "text": _NO_DATA_DISCLAIMER}
                 for tok in buffered:
                     yield {"type": "token", "text": tok}
+                # Lưu cache chỉ khi grounded (có dữ liệu nội bộ) + không cá nhân hoá.
+                if cache_ok and results and not stop_event.is_set():
+                    final = "".join(buffered).strip()
+                    if final:
+                        await _store_qa_cache(q, qvec, final, intent, merged, sources)
                 yield {"type": "done"}
                 return
             except GeminiFallbackError as e:
@@ -679,6 +733,7 @@ class RAGPipeline:
                 t_before_gen = time.perf_counter()
 
         # 4.2. Local LLM generation (primary khi Gemini không configured, hoặc fallback)
+        local_parts: list[str] = []
         async for token in generate_streaming(
             messages,
             self.llm,
@@ -692,6 +747,7 @@ class RAGPipeline:
                 print(f"[TIMING] >>> TTFT (total to first token): {(t_first - t_start)*1000:.0f}ms")
                 first_token_logged = True
             token_count += 1
+            local_parts.append(token)
             yield {"type": "token", "text": token}
 
         t_done = time.perf_counter()
@@ -700,6 +756,11 @@ class RAGPipeline:
         print(f"[TIMING] generation: {gen_dur*1000:.0f}ms "
               f"({token_count} tokens, {tok_per_s:.1f} tok/s)")
         print(f"[TIMING] === TOTAL: {(t_done - t_start)*1000:.0f}ms ===")
+
+        if cache_ok and results and not stop_event.is_set():
+            final = "".join(local_parts).strip()
+            if final:
+                await _store_qa_cache(q, qvec, final, intent, merged, sources)
 
         yield {"type": "done"}
 
