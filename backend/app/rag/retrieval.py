@@ -122,8 +122,8 @@ async def retrieve_from_collection(
         results = []
         for point in points:
             score = point.score if hasattr(point, "score") else 0.0
-            if score < score_threshold:
-                continue
+            # Giữ nguyên cơ chế của Notebook: KHÔNG lọc bằng score_threshold ở bước vector search,
+            # để tránh miss dữ liệu khi similarity score tự nhiên thấp.
             payload = point.payload or {}
 
             # Lọc thủ công (Đã tối ưu hóa logic khoảng giá)

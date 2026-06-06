@@ -83,16 +83,16 @@ async def lifespan(app: FastAPI):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     print("Loading embedding model...")
-    encoder = SentenceTransformer(config.EMBED_MODEL_NAME, device=device)
+    encoder = SentenceTransformer(config.EMBED_MODEL_NAME, device=device, local_files_only=True)
 
     reranker = None
     if config.ENABLE_RERANKER:
         print("Loading reranker model...")
         try:
-            reranker = CrossEncoder(config.RERANKER_MODEL_NAME, max_length=512, device=device)
+            reranker = CrossEncoder(config.RERANKER_MODEL_NAME, max_length=512, device=device, local_files_only=True)
         except Exception as exc:
-            print(f"[startup] WARNING: Reranker failed to load ({type(exc).__name__}: {exc}). "
-                  f"Continuing without reranking — result quality will be reduced.")
+            import traceback
+            print(f"[startup] WARNING: Reranker failed to load:\n{traceback.format_exc()}")
     else:
         print("Reranker disabled (ENABLE_RERANKER=false) — skipping to save memory.")
 

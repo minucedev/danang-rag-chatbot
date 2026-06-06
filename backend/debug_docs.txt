@@ -1,0 +1,5 @@
+=== raw_docs ===
+name='Ngũ Hành Sơn (Marble Mountains)', score=0.42903498, district=ngu hanh son, collection=places_danang
+  entity_name='Ngũ Hành Sơn (Marble Mountains)', place_name='Ngũ Hành Sơn (Marble Mountains)'
+name='Làng đá mỹ nghệ Non Nước', score=0.42653412, district=ngu hanh son, collection=places_danang
+  entity_name='Làng đá mỹ nghệ Non Nước', place_name='Làng đá mỹ nghệ Non Nước'

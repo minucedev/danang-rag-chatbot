@@ -1,0 +1,3 @@
+places_danang: 41
+restaurants_danang: 548
+accommodation_hotels_danang: 544
