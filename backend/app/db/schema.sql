@@ -1,9 +1,29 @@
+-- Tài khoản người dùng (admin tạo sẵn qua scripts/create_user.py — không có register công khai).
+CREATE TABLE IF NOT EXISTS users (
+    id            TEXT    PRIMARY KEY,          -- uuid4
+    username      TEXT    NOT NULL UNIQUE,
+    password_hash TEXT    NOT NULL,             -- pbkdf2_hmac sha256, hex
+    password_salt TEXT    NOT NULL,             -- 16 byte, hex
+    created_at    INTEGER NOT NULL
+);
+
+-- Token đăng nhập opaque. Chỉ lưu sha256(token) — rò DB không lộ token thô. Xóa row = logout/thu hồi.
+CREATE TABLE IF NOT EXISTS auth_tokens (
+    token_hash TEXT    PRIMARY KEY,             -- sha256(token thô) hex
+    user_id    TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER                          -- nullable; mặc định TTL 30 ngày
+);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_user ON auth_tokens(user_id);
+
 CREATE TABLE IF NOT EXISTS sessions (
     id          TEXT    PRIMARY KEY,
     title       TEXT    NOT NULL,
+    user_id     TEXT,                           -- chủ sở hữu (NULL = chat ẩn danh cũ, vô chủ)
     created_at  INTEGER NOT NULL,
     updated_at  INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, updated_at);
 
 CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

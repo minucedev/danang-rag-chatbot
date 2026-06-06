@@ -100,6 +100,23 @@ Mở trình duyệt: **http://localhost:3000**
 
 ---
 
+## 4b. Tạo tài khoản & đăng nhập
+
+App **yêu cầu đăng nhập** (mỗi tài khoản có chat/yêu thích/lịch trình riêng). Không có trang đăng ký
+công khai — admin tạo tài khoản bằng CLI:
+
+```powershell
+python backend\scripts\create_user.py demo demo123456
+```
+
+Mở **http://localhost:3000** → bị chuyển tới `/login` → đăng nhập bằng tài khoản vừa tạo.
+
+> Token lưu trong SQLite (`backend/data/chats.db`), gửi qua `Authorization: Bearer`. Đăng xuất ở nút
+> **Đăng xuất** cuối sidebar. Dữ liệu chat/yêu thích ẩn danh CŨ (trước khi có login) sẽ vô chủ — muốn
+> sạch thì xóa `backend\data\chats.db*` rồi khởi động lại.
+
+---
+
 ## 5. Thử nhanh
 
 Gõ vào ô chat: `Gợi ý khách sạn 4 sao ở Sơn Trà`

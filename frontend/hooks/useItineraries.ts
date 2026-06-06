@@ -1,7 +1,6 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiDelete } from "@/lib/api";
-import { getClientId } from "@/lib/clientId";
 
 export interface ItineraryListItem {
   id: number;
@@ -22,8 +21,7 @@ export interface Itinerary {
 export function useItinerariesQuery() {
   return useQuery<{ items: ItineraryListItem[]; total: number }>({
     queryKey: ["itineraries"],
-    queryFn: () =>
-      apiFetch(`/api/itineraries?clientId=${encodeURIComponent(getClientId())}`),
+    queryFn: () => apiFetch(`/api/itineraries`),
     staleTime: 30_000,
   });
 }
@@ -31,8 +29,7 @@ export function useItinerariesQuery() {
 export function useItineraryQuery(id: number | null) {
   return useQuery<Itinerary>({
     queryKey: ["itinerary", id],
-    queryFn: () =>
-      apiFetch(`/api/itineraries/${id}?clientId=${encodeURIComponent(getClientId())}`),
+    queryFn: () => apiFetch(`/api/itineraries/${id}`),
     enabled: id != null,
   });
 }
@@ -43,7 +40,7 @@ export function useCreateItinerary() {
     mutationFn: (input: { title: string; contentMd: string; sessionId?: string | null }) =>
       apiFetch<Itinerary>("/api/itineraries", {
         method: "POST",
-        body: JSON.stringify({ clientId: getClientId(), ...input }),
+        body: JSON.stringify(input),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["itineraries"] }),
   });
@@ -53,7 +50,7 @@ export function useDeleteItinerary() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) =>
-      apiDelete(`/api/itineraries/${id}?clientId=${encodeURIComponent(getClientId())}`),
+      apiDelete(`/api/itineraries/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["itineraries"] }),
   });
 }

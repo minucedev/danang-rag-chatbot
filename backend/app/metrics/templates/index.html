@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Metrics — Đà Nẵng RAG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/admin/metrics/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+
+<body>
+  <div class="shell">
+    <header>
+      <h1>📊 Metrics <span>Đánh giá RAG · benchmark trên pipeline thật</span></h1>
+      <div id="status-badge" class="badge badge-idle">đang tải…</div>
+    </header>
+
+    <!-- ── Controls ── -->
+    <div class="card">
+      <div class="card-title"><i class="icon">⚙️</i> Chạy đánh giá</div>
+      <div class="controls">
+        <label>Bộ benchmark
+          <select id="suite">
+            <option value="both">Tất cả (46)</option>
+            <option value="general">Chung (36)</option>
+            <option value="itinerary">Lịch trình (10)</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="judge" checked> LLM-as-Judge (Gemini)</label>
+        <button id="run-btn" class="btn btn-primary">▶ Chạy đánh giá</button>
+        <span id="progress" class="progress-text"></span>
+      </div>
+    </div>
+
+    <!-- ── Log ── -->
+    <div class="card">
+      <div class="card-title"><i class="icon">📋</i> Log tiến độ</div>
+      <div id="log" class="log-box"></div>
+    </div>
+
+    <!-- ── Report card ── -->
+    <div class="card">
+      <div class="card-title"><i class="icon">🏅</i> Report card <span id="rc-meta" style="text-transform:none;font-weight:400"></span></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Nhóm</th><th>Chỉ số</th><th>Điểm</th><th>Mục tiêu</th><th>Đạt</th></tr>
+          </thead>
+          <tbody id="rc-body"></tbody>
+        </table>
+      </div>
+      <div id="csv-links" class="csv-links"></div>
+    </div>
+
+    <!-- ── Charts ── -->
+    <div class="card">
+      <div class="card-title"><i class="icon">📈</i> Biểu đồ</div>
+      <div class="charts">
+        <div class="chart-box"><h3>Recall@k</h3><canvas id="chart-recall"></canvas></div>
+        <div class="chart-box"><h3>Intent Accuracy theo category (%)</h3><canvas id="chart-intent"></canvas></div>
+        <div class="chart-box"><h3>Latency breakdown (giây)</h3><canvas id="chart-latency"></canvas></div>
+        <div class="chart-box"><h3>Itinerary score</h3><canvas id="chart-itin"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ── History ── -->
+    <div class="card">
+      <div class="card-title"><i class="icon">🕐</i> Lịch sử chạy</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Run ID</th><th>Suite</th><th>Judge</th><th>Đạt</th><th>Thời gian</th></tr>
+          </thead>
+          <tbody id="runs-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = "/admin/metrics";
+    const fmtTime = (ts) => ts ? new Date(ts * 1000).toLocaleString("vi-VN") : "—";
+    const mean = (arr) => arr.length ? arr.reduce((a, b) => a + (b ?? 0), 0) / arr.length : 0;
+    const charts = {};
+
+    function drawChart(id, config) {
+      if (charts[id]) charts[id].destroy();
+      charts[id] = new Chart(document.getElementById(id), config);
+    }
+
+    const AXIS = { ticks: { color: "#8b90a0" }, grid: { color: "#2e3340" } };
+    const baseOpts = (extra = {}) => ({
+      responsive: true,
+      plugins: { legend: { labels: { color: "#e4e7ef" } } },
+      scales: { x: AXIS, y: { ...AXIS, beginAtZero: true, ...extra } },
+    });
+
+    function renderReportCard(data) {
+      const nErr = (data.errored_ids || []).length;
+      document.getElementById("rc-meta").textContent =
+        `— ${data.suite} · ${data.n_pass}/${data.n_total} đạt` +
+        (nErr ? ` · ⚠️ ${nErr} câu lỗi (đã loại)` : "") + ` · ${data.id}`;
+      document.getElementById("rc-body").innerHTML = (data.report_card || []).map(r => `
+        <tr><td>${r.group}</td><td>${r.metric}</td><td>${r.score}</td><td>${r.target}</td>
+        <td class="${r.pass === '✅' ? 'pass-yes' : 'pass-no'}">${r.pass}</td></tr>`).join("");
+
+      const names = ["eval_retrieval", "eval_generation", "eval_itinerary", "eval_report_card"];
+      document.getElementById("csv-links").innerHTML = names.map(n =>
+        `<a href="${API}/api/runs/${data.id}/${n}.csv">⬇ ${n}.csv</a>`).join("");
+    }
+
+    function renderCharts(data) {
+      const ret = data.retrieval_rows || [];
+      const perf = data.perf_rows || [];
+      const itin = data.itinerary_rows || [];
+
+      // Recall@k
+      drawChart("chart-recall", {
+        type: "bar",
+        data: {
+          labels: ["Recall@1", "Recall@3", "Recall@5"],
+          datasets: [{
+            label: "%", backgroundColor: "#6c5ce7",
+            data: [
+              mean(ret.map(r => r["recall@1"])) * 100,
+              mean(ret.map(r => r["recall@3"])) * 100,
+              mean(ret.map(r => r["recall@5"])) * 100,
+            ],
+          }],
+        },
+        options: baseOpts({ max: 100 }),
+      });
+
+      // Intent accuracy by category
+      const byCat = {};
+      ret.forEach(r => {
+        (byCat[r.category] ??= []).push(r.intent_correct ? 1 : 0);
+      });
+      const cats = Object.keys(byCat);
+      drawChart("chart-intent", {
+        type: "bar",
+        data: {
+          labels: cats,
+          datasets: [{ label: "%", backgroundColor: "#00b894", data: cats.map(c => mean(byCat[c]) * 100) }],
+        },
+        options: { ...baseOpts({ max: 100 }), indexAxis: "y" },
+      });
+
+      // Latency breakdown
+      drawChart("chart-latency", {
+        type: "bar",
+        data: {
+          labels: perf.map(p => p.id),
+          datasets: [
+            { label: "Retrieval", backgroundColor: "#74b9ff", data: perf.map(p => p.latency_retrieval ?? 0) },
+            {
+              label: "Generation", backgroundColor: "#fdcb6e",
+              data: perf.map(p => Math.max(0, (p.latency_total ?? 0) - (p.latency_retrieval ?? 0))),
+            },
+          ],
+        },
+        options: { ...baseOpts(), scales: { x: { ...AXIS, stacked: true }, y: { ...AXIS, stacked: true, beginAtZero: true } } },
+      });
+
+      // Itinerary score
+      drawChart("chart-itin", {
+        type: "bar",
+        data: {
+          labels: itin.map(r => r.id),
+          datasets: [{ label: "score", backgroundColor: "#a29bfe", data: itin.map(r => r.itinerary_score) }],
+        },
+        options: baseOpts({ max: 1 }),
+      });
+    }
+
+    async function loadRun(runId) {
+      const data = await (await fetch(`${API}/api/runs/${runId}`)).json();
+      if (data.error) return;
+      renderReportCard(data);
+      renderCharts(data);
+    }
+
+    async function loadRuns() {
+      const runs = await (await fetch(`${API}/api/runs`)).json();
+      document.getElementById("runs-body").innerHTML = runs.map(r => `
+        <tr>
+          <td><span class="run-link" data-id="${r.id}">${r.id}</span></td>
+          <td>${r.suite}</td><td>${r.enable_judge ? "✓" : "—"}</td>
+          <td>${r.n_pass}/${r.n_total}</td><td>${fmtTime(r.created_at)}</td>
+        </tr>`).join("") || `<tr><td colspan="5" class="empty-row">Chưa có lượt chạy nào.</td></tr>`;
+      document.querySelectorAll(".run-link").forEach(el => el.onclick = () => loadRun(el.dataset.id));
+      return runs;
+    }
+
+    let lastLatestId = null;
+    async function loadState() {
+      const { state, latest } = await (await fetch(`${API}/api/state`)).json();
+      const b = document.getElementById("status-badge");
+      const p = document.getElementById("progress");
+      if (state.running) {
+        b.textContent = "⏳ đang chạy";
+        b.className = "badge badge-busy";
+        p.textContent = `${state.current}/${state.total}`;
+      } else {
+        b.textContent = "✓ rảnh";
+        b.className = "badge badge-idle";
+        p.textContent = "";
+      }
+      // Khi có run mới hoàn tất → nạp report card + biểu đồ.
+      if (latest && latest.id !== lastLatestId) {
+        lastLatestId = latest.id;
+        loadRun(latest.id);
+      }
+      return state.running;
+    }
+
+    document.getElementById("run-btn").onclick = async () => {
+      const suite = document.getElementById("suite").value;
+      const enable_judge = document.getElementById("judge").checked;
+      const res = await fetch(`${API}/api/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suite, enable_judge }),
+      });
+      if (res.status === 409) alert("Đang có một lượt eval chạy.");
+    };
+
+    const logEl = document.getElementById("log");
+    const es = new EventSource(`${API}/api/logs/stream`);
+    es.onmessage = (e) => { logEl.textContent += e.data + "\n"; logEl.scrollTop = logEl.scrollHeight; };
+
+    async function tick() {
+      const running = await loadState();
+      await loadRuns();
+      setTimeout(tick, running ? 2000 : 7000);
+    }
+    tick();
+  </script>
+</body>
+
+</html>

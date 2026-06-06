@@ -6,9 +6,10 @@ import time
 import uuid
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from sse_starlette.sse import EventSourceResponse
 
+from app.api.deps import get_current_user
 from app.rag.schemas import ChatRequest
 from app.db import sessions as db
 from app import config
@@ -27,15 +28,22 @@ def _get_pipeline():
 async def _event_stream(
     req: ChatRequest,
     request: Request,
+    user_id: str,
 ) -> AsyncIterator[dict]:
     pipeline = _get_pipeline()
     stop_event = threading.Event()
 
-    # Ensure session exists
+    # Ensure session exists VÀ thuộc user. Nếu client gửi session_id của người khác /
+    # không tồn tại → tạo session mới thuộc user (không ghi đè chat người khác).
     session_id = req.session_id
-    if not session_id or not await db.get_session(session_id):
+    if not session_id or not await db.session_owned_by(session_id, user_id):
         title = db.auto_title_from_message(req.message)
-        session_id = await db.create_session(title)
+        session_id = await db.create_session(title, user_id=user_id)
+
+    # profile_session_id chỉ dùng khi thuộc user — tránh rò cá nhân hóa chéo tài khoản.
+    profile_session_id = req.profile_session_id
+    if profile_session_id and not await db.session_owned_by(profile_session_id, user_id):
+        profile_session_id = None
 
     # Persist user message immediately
     user_msg_id = await db.add_message(session_id, "user", req.message)
@@ -83,7 +91,7 @@ async def _event_stream(
                 max_new_tokens=config.DEFAULT_MAX_TOKENS,
                 temperature=config.DEFAULT_TEMPERATURE,
                 session_id=session_id,
-                profile_session_id=req.profile_session_id,
+                profile_session_id=profile_session_id,
             ):
                 # Check client disconnect on every event
                 if await request.is_disconnected():
@@ -172,9 +180,9 @@ async def _event_stream(
 
 
 @router.post("/api/chat/stream")
-async def chat_stream(req: ChatRequest, request: Request):
+async def chat_stream(req: ChatRequest, request: Request, user: dict = Depends(get_current_user)):
     return EventSourceResponse(
-        _event_stream(req, request),
+        _event_stream(req, request, user["id"]),
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",

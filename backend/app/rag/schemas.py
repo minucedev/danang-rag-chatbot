@@ -225,12 +225,11 @@ class RecommendResponse(BaseModel):
     notes: List[str] = Field(default_factory=list)
 
 
-# ─── Favorites (địa điểm đã lưu, ẩn danh theo client_id) ───────────────────
+# ─── Favorites (địa điểm đã lưu, chủ sở hữu suy từ token đăng nhập) ─────────
 
 class FavoriteCreate(BaseModel):
     model_config = _CAMEL_CONFIG
 
-    client_id: str
     point_id: str
     collection: str
     snapshot: dict  # passthrough source dict (shape SourceCard) — đổi schema không vỡ
@@ -251,7 +250,6 @@ class FavoriteEntity(BaseModel):
 class ItineraryCreate(BaseModel):
     model_config = _CAMEL_CONFIG
 
-    client_id: str
     title: str = Field(..., min_length=1, max_length=200)
     content_md: str = Field(..., min_length=1)
     session_id: Optional[str] = None

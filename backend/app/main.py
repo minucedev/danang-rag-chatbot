@@ -90,7 +90,9 @@ async def _scheduled_crawl_admin() -> None:
 
 
 from app.api import chat, sessions, health, profile, recommend, admin, events, favorites, itineraries
+from app.api import auth as auth_api
 from app.api import crawl_admin as crawl_admin_api
+from app.api import metrics_admin
 
 
 @asynccontextmanager
@@ -210,6 +212,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_api.router)
 app.include_router(chat.router)
 app.include_router(sessions.router)
 app.include_router(health.router)
@@ -220,12 +223,20 @@ app.include_router(events.router)
 app.include_router(favorites.router)
 app.include_router(itineraries.router)
 app.include_router(crawl_admin_api.router)
+app.include_router(metrics_admin.router)
 
 # Static cho dashboard crawl (style.css) — phục vụ tại /admin/crawl/static/*
 app.mount(
     "/admin/crawl/static",
     StaticFiles(directory=str(Path(__file__).resolve().parent / "crawl_admin" / "static")),
     name="crawl_admin_static",
+)
+
+# Static cho dashboard metrics — phục vụ tại /admin/metrics/static/*
+app.mount(
+    "/admin/metrics/static",
+    StaticFiles(directory=str(Path(__file__).resolve().parent / "metrics" / "static")),
+    name="metrics_admin_static",
 )
 
 # Module-level placeholder so health.py can check before pipeline loads

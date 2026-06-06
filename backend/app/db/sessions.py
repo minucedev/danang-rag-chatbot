@@ -21,6 +21,12 @@ async def init_db() -> None:
     await _db.execute("PRAGMA foreign_keys=ON")
     schema = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
     await _db.executescript(schema)
+    # Migration idempotent cho DB cũ: schema.sql dùng CREATE TABLE IF NOT EXISTS nên KHÔNG
+    # thêm cột vào bảng sessions đã tồn tại → ALTER thủ công, bỏ qua nếu cột đã có.
+    try:
+        await _db.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
+    except aiosqlite.OperationalError:
+        pass  # cột user_id đã tồn tại
     await _db.commit()
 
 
@@ -42,21 +48,22 @@ def auto_title_from_message(content: str) -> str:
     return (title[:37] + "...") if len(title) > 40 else (title or "Cuộc hội thoại mới")
 
 
-async def create_session(title: str) -> str:
+async def create_session(title: str, user_id: Optional[str] = None) -> str:
     sid = str(uuid.uuid4())
     now = int(time.time())
     await _db_conn().execute(
-        "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (sid, title, now, now),
+        "INSERT INTO sessions (id, title, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (sid, title, user_id, now, now),
     )
     await _db_conn().commit()
     return sid
 
 
-async def list_sessions(limit: int = 50, offset: int = 0) -> List[SessionEntity]:
+async def list_sessions(user_id: str, limit: int = 50, offset: int = 0) -> List[SessionEntity]:
     async with _db_conn().execute(
-        "SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-        (limit, offset),
+        "SELECT id, title, created_at, updated_at FROM sessions "
+        "WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+        (user_id, limit, offset),
     ) as cur:
         rows = await cur.fetchall()
     return [SessionEntity(**dict(r)) for r in rows]
@@ -69,6 +76,15 @@ async def get_session(session_id: str) -> Optional[SessionEntity]:
     ) as cur:
         row = await cur.fetchone()
     return SessionEntity(**dict(row)) if row else None
+
+
+async def session_owned_by(session_id: str, user_id: str) -> bool:
+    """True nếu session tồn tại VÀ thuộc user. Dùng để gác quyền ở router (404 nếu False)."""
+    async with _db_conn().execute(
+        "SELECT 1 FROM sessions WHERE id = ? AND user_id = ?",
+        (session_id, user_id),
+    ) as cur:
+        return await cur.fetchone() is not None
 
 
 async def rename_session(session_id: str, new_title: str) -> None:

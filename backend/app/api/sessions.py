@@ -1,7 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 
+from app.api.deps import get_current_user
 from app.db import sessions as db
 from app.rag.schemas import SessionEntity, MessageEntity
 
@@ -12,47 +12,43 @@ class RenameBody(BaseModel):
     title: str
 
 
+async def _owned_or_404(session_id: str, user: dict) -> None:
+    if not await db.session_owned_by(session_id, user["id"]):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
 @router.get("/api/sessions", response_model=list[SessionEntity])
-async def list_sessions(limit: int = 50, offset: int = 0):
-    return await db.list_sessions(limit=limit, offset=offset)
+async def list_sessions(limit: int = 50, offset: int = 0, user: dict = Depends(get_current_user)):
+    return await db.list_sessions(user["id"], limit=limit, offset=offset)
 
 
 @router.post("/api/sessions", response_model=SessionEntity)
-async def create_session(body: RenameBody):
-    sid = await db.create_session(body.title)
-    session = await db.get_session(sid)
-    return session
+async def create_session(body: RenameBody, user: dict = Depends(get_current_user)):
+    sid = await db.create_session(body.title, user_id=user["id"])
+    return await db.get_session(sid)
 
 
 @router.get("/api/sessions/{session_id}", response_model=SessionEntity)
-async def get_session(session_id: str):
-    session = await db.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return session
+async def get_session(session_id: str, user: dict = Depends(get_current_user)):
+    await _owned_or_404(session_id, user)
+    return await db.get_session(session_id)
 
 
 @router.get("/api/sessions/{session_id}/messages", response_model=list[MessageEntity])
-async def get_messages(session_id: str):
-    session = await db.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+async def get_messages(session_id: str, user: dict = Depends(get_current_user)):
+    await _owned_or_404(session_id, user)
     return await db.get_messages(session_id)
 
 
 @router.patch("/api/sessions/{session_id}", response_model=SessionEntity)
-async def rename_session(session_id: str, body: RenameBody):
-    session = await db.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+async def rename_session(session_id: str, body: RenameBody, user: dict = Depends(get_current_user)):
+    await _owned_or_404(session_id, user)
     await db.rename_session(session_id, body.title)
     return await db.get_session(session_id)
 
 
 @router.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str):
-    session = await db.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+async def delete_session(session_id: str, user: dict = Depends(get_current_user)):
+    await _owned_or_404(session_id, user)
     await db.delete_session(session_id)
     return {"ok": True}

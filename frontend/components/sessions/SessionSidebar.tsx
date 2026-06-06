@@ -2,12 +2,14 @@
 import { useParams, useRouter } from "next/navigation";
 import { useSessionsQuery } from "@/hooks/useSessions";
 import { relativeDate } from "@/lib/format";
+import { useAuth } from "@/app/auth-provider";
 import { SessionItem } from "./SessionItem";
 
 export function SessionSidebar() {
   const { data: sessions = [] } = useSessionsQuery();
   const params = useParams();
   const router = useRouter();
+  const { user, logout } = useAuth();
   const activeId = params?.sessionId as string | undefined;
 
   // Group by day
@@ -66,6 +68,13 @@ export function SessionSidebar() {
         <button className="w-full flex items-center gap-3 px-3 py-2.5 text-on-surface-variant hover:bg-surface-container-highest rounded-xl text-sm transition-colors">
           <span className="material-symbols-outlined text-xl">settings</span>
           Settings
+        </button>
+        <button
+          onClick={() => logout()}
+          className="w-full flex items-center gap-3 px-3 py-2.5 text-on-surface-variant hover:bg-surface-container-highest rounded-xl text-sm transition-colors"
+        >
+          <span className="material-symbols-outlined text-xl">logout</span>
+          {user ? `Đăng xuất (${user.username})` : "Đăng xuất"}
         </button>
       </div>
     </aside>
