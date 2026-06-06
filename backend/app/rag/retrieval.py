@@ -129,8 +129,8 @@ async def retrieve_from_collection(
             # Lọc thủ công (Đã tối ưu hóa logic khoảng giá)
             skip = False
             if filters:
-                min_price = payload.get("min_price_vnd")
-                max_price = payload.get("max_price_vnd")
+                min_price = payload.get("min_price_vnd") or payload.get("price_min_vnd")
+                max_price = payload.get("max_price_vnd") or payload.get("price_max_vnd")
 
                 # CHẶN TRẦN GIÁ (max_price)
                 if filters.get("max_price"):
@@ -184,8 +184,8 @@ async def retrieve_from_collection(
                 "place_name": payload.get("place_name", ""),
                 "district": payload.get("district", ""),
                 "rating": _float(payload.get("rating")),
-                "min_price": _float(payload.get("min_price_vnd")),
-                "max_price": _float(payload.get("max_price_vnd")),
+                "min_price": _float(payload.get("min_price_vnd") or payload.get("price_min_vnd")),
+                "max_price": _float(payload.get("max_price_vnd") or payload.get("price_max_vnd")),
                 "address": payload.get("address", ""),
                 "content": payload.get("content", ""),
                 "parent_entity_name": payload.get("parent_entity_name"),

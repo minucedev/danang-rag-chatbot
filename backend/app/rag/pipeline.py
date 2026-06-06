@@ -3,6 +3,7 @@ import asyncio
 import re
 import threading
 import time
+import json
 from typing import AsyncIterator, Optional, List
 
 from qdrant_client import AsyncQdrantClient
@@ -53,26 +54,43 @@ _CHITCHAT_SYSTEM_PROMPT = (
     "hướng dẫn người dùng hỏi về du lịch Đà Nẵng."
 )
 
-_ITINERARY_RULES = (
-    "Hãy lập lịch trình chi tiết và hấp dẫn theo từng ngày (Ví dụ: **NGÀY 1:**, **NGÀY 2:**, ...).\n"
-    "Mỗi ngày nên gợi ý: buổi sáng, trưa, chiều, tối. Tất cả các buổi BẮT BUỘC IN HOA (Ví dụ: **SÁNG:**, **TRƯA:**, **CHIỀU:**, **TỐI:**).\n"
-    "TUYỆT ĐỐI KHÔNG đặt mục 'Lưu trú' hoặc 'Khách sạn' vào lịch trình từng ngày.\n"
-    "BẮT BUỘC KHÔNG ĐƯỢC LẶP LẠI địa điểm.\n"
-    "\n# ITINERARY WRITING STYLE & LOGIC (QUY TẮC BẮT BUỘC)\n"
-    "1. Lựa chọn địa điểm và Thời gian:\n"
-    "   - Nơi có Loại 'Nhà hàng/Quán ăn' CHỈ dùng cho mục đích ăn uống hoặc cà phê, KHÔNG dùng làm điểm tham quan.\n"
-    "   - Nơi có Loại 'Điểm tham quan/Vui chơi' (đặc biệt là thiên nhiên, bảo tàng) NÊN ưu tiên xếp vào Sáng hoặc Chiều.\n"
-    "   - Nơi có Loại 'Khách sạn/Lưu trú' BẮT BUỘC gom chung vào một mục **GỢI Ý LƯU TRÚ** ở cuối bài. CHỈ đề xuất 1 khách sạn duy nhất cho toàn bộ chuyến đi.\n"
-    "2. TUYỆT ĐỐI KHÔNG BỊA ĐẶT địa chỉ hay giá tiền. NẾU DỮ LIỆU KHÔNG CÓ GIÁ, KHÔNG ĐƯỢC TỰ Ý GHI 'MIỄN PHÍ' HAY BỊA GIÁ.\n"
-    "3. BẮT BUỘC TRÌNH BÀY theo CẤU TRÚC MẪU dưới đây (gồm đoạn văn và gạch đầu dòng):\n"
-    "\n"
-    "--- CẤU TRÚC MẪU ---\n"
-    "**SÁNG/TRƯA/CHIỀU/TỐI:** [Điền Tên địa điểm]. [Viết đoạn văn lý do...]\n"
-    "- Địa chỉ: [Điền Địa chỉ từ dữ liệu]\n"
-    "- Chi phí: [Ghi rõ 'Mức giá:' đối với nhà hàng, 'Giá vé:' đối với điểm tham quan. NẾU TRONG DỮ LIỆU KHÔNG CÓ DÒNG NÀO GHI 'GIÁ:', BẠN BẮT BUỘC PHẢI XÓA HẲN DÒNG CHI PHÍ NÀY, KHÔNG TỰ BỊA!]\n"
-    "--------------------\n"
-    "\n"
-    "4. KHÔNG IN RA các số thứ tự như [1], [2] vào bài viết.\n"
+
+
+_ITINERARY_PLANNER_SYSTEM_PROMPT = (
+    "Bạn là trợ lý lập kế hoạch lịch trình du lịch Đà Nẵng.\n"
+    "Nhiệm vụ của bạn là phân tích yêu cầu của người dùng và tạo ra một khung kế hoạch (skeleton itinerary) chi tiết theo từng ngày và các buổi trong ngày.\n\n"
+    "Để lịch trình hợp lý, mượt mà và tránh mất thời gian di chuyển:\n"
+    "1. Phân bổ các buổi trong cùng một ngày ở các khu vực gần nhau hoặc cùng một Quận.\n"
+    "2. Xác định rõ chủ đề/hoạt động cho từng buổi.\n"
+    "3. Tạo câu truy vấn tìm kiếm ngắn gọn bằng tiếng Việt mô tả địa điểm mong muốn.\n"
+    "4. Xác định loại hình địa điểm cần tìm kiếm để chọn collection tương ứng:\n"
+    "   - \"place\" (địa điểm du lịch, vui chơi, tham quan)\n"
+    "   - \"restaurant\" (nhà hàng, quán ăn, quán cà phê)\n"
+    "   - \"hotel\" (nơi lưu trú, khách sạn. LUÔN LUÔN thêm 1 slot riêng để tìm khách sạn vào ngày 1)\n\n"
+    "BẮT BUỘC trả về kết quả dưới dạng một JSON array thuần túy. Cấu trúc như sau:\n"
+    "[\n"
+    "  {\n"
+    "    \"day\": 1,\n"
+    "    \"slots\": [\n"
+    "      {\n"
+    "        \"session\": \"Lưu trú\",\n"
+    "        \"district\": \"hai chau\",\n"
+    "        \"theme\": \"Khách sạn/Homestay\",\n"
+    "        \"query\": \"khách sạn tiện nghi\",\n"
+    "        \"collection_type\": \"hotel\"\n"
+    "      },\n"
+    "      {\n"
+    "        \"session\": \"Sáng\",\n"
+    "        \"district\": \"hai chau\",\n"
+    "        \"theme\": \"tham quan\",\n"
+    "        \"query\": \"cầu sông hàn\",\n"
+    "        \"collection_type\": \"place\"\n"
+    "      }\n"
+    "    ]\n"
+    "  }\n"
+    "]\n\n"
+    "Dựa vào số ngày người dùng yêu cầu để tạo số lượng ngày tương ứng (mặc định 3 ngày 2 đêm).\n"
+    "Chỉ trả về chuỗi JSON array hợp lệ."
 )
 
 # Prompt rút gọn cho nhánh Gemini fallback: không có "Reference data" nên không
@@ -254,7 +272,7 @@ def _norm_match_text(text: str) -> str:
     return re.sub(r"\s+", " ", str(text).lower()).strip() if text else ""
 
 
-_UNKNOWN_NAMES = {"unknown", "đang cập nhật"}
+_UNKNOWN_NAMES = {"Không có thông tin", "đang cập nhật"}
 
 
 def _unaccent(s: str) -> str:
@@ -315,7 +333,7 @@ def _build_specific_fallback(query: str, results: List[SearchResultSchema]) -> s
     lines = []
     for r in results[:config.MAX_ALTERNATIVES]:
         name = r.get_display_name()
-        if not name or name in ("Unknown", "Đang cập nhật"):
+        if not name or name in ("Không có thông tin", "Đang cập nhật"):
             continue
         parts = [f"- {name}"]
         addr = r.get_address_display()
@@ -369,14 +387,18 @@ def _build_messages(
     results: list[SearchResultSchema],
     history: list[dict],
     intent: QueryIntent,
-    session_summary: Optional[str] = None
+    session_summary: Optional[str] = None,
+    prebuilt_context: Optional[str] = None,
 ) -> list[dict]:
-    max_ctx_items = 30 if intent == QueryIntent.ITINERARY_SEARCH else 8
-    max_ctx_chars = 15000 if intent == QueryIntent.ITINERARY_SEARCH else config.MAX_CONTEXT_CHARS
-    context = _format_context(results, max_items=max_ctx_items, max_chars=max_ctx_chars)
+    if prebuilt_context is not None:
+        context = prebuilt_context
+    else:
+        max_ctx_items = 30 if intent == QueryIntent.ITINERARY_SEARCH else 8
+        max_ctx_chars = 15000 if intent == QueryIntent.ITINERARY_SEARCH else config.MAX_CONTEXT_CHARS
+        context = _format_context(results, max_items=max_ctx_items, max_chars=max_ctx_chars)
 
     hint = ""
-    if intent == QueryIntent.CHITCHAT or not results:
+    if intent == QueryIntent.CHITCHAT or (not results and prebuilt_context is None):
         messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
         from app.rag.manager import build_final_context_prompt
         history_msgs = build_final_context_prompt(session_summary, history)
@@ -385,7 +407,24 @@ def _build_messages(
         return messages
 
     if intent == QueryIntent.ITINERARY_SEARCH:
-        hint = "Hãy viết theo văn phong tư vấn du lịch tự nhiên (không dùng format dạng list dữ liệu thô). Trình bày mỗi buổi bằng một đoạn văn ngắn, khéo léo lồng ghép tên địa điểm, vị trí, lý do đề xuất và chi phí (nếu có). Mục Khách sạn ở cuối cũng viết thành đoạn văn tư vấn. Tôn trọng quy tắc KHÔNG lặp địa điểm."
+        hint = (
+            "Hãy lập lịch trình chi tiết theo ngày. BẮT BUỘC viết dựa trên khung lịch trình và các địa điểm thực tế gợi ý tương ứng với từng Buổi (Sáng/Chiều/Tối) trong thông tin được cung cấp.\n"
+            "Về định dạng, hãy sử dụng Markdown. Với mỗi ngày, phải có tiêu đề ngày in đậm, sau đó là danh sách lồng nhau cho từng buổi như sau:\n\n"
+            "### **Ngày [X]**: [Tiêu đề tóm tắt cho ngày]\n"
+            "*   **Buổi [Sáng/Chiều/Tối]: [Tên địa điểm]**\n"
+            "    *   **Địa điểm:** [Tên địa điểm]\n"
+            "    *   **Địa chỉ:** [Lấy từ dữ liệu]\n"
+            "    *   **Điểm nổi bật:** [Mô tả ngắn]\n"
+            "    *   **Chi phí:** [Lấy đúng thông tin từ trường 'Giá:' trong dữ liệu cung cấp, nếu là 0 VND hãy ghi 'Miễn phí'. Nếu dữ liệu thực sự không có trường Giá, mới ghi 'Không có thông tin']\n"
+            "    *   **Lưu ý:** [Giờ mở cửa, thời điểm lý tưởng]\n\n"
+            "ĐẶC BIỆT: NẾU trong dữ liệu cung cấp có địa điểm lưu trú (khách sạn/homestay/resort), HÃY TÁCH NÓ RA và đặt ở CUỐI CÙNG của toàn bộ lịch trình dưới dạng một phần riêng (KHÔNG nằm trong ngày nào):\n\n"
+            "### **Gợi ý Lưu trú**\n"
+            "*   **Tên:** [Tên khách sạn]\n"
+            "    *   **Địa chỉ:** [Địa chỉ]\n"
+            "    *   **Lý do nên chọn:** [Mô tả ngắn/Điểm nổi bật]\n"
+            "    *   **Chi phí tham khảo từ:** [lấy đúng từ dữ liệu]\n\n"
+            "Tuyệt đối không gộp chung thành một đoạn văn."
+        )
     elif intent == QueryIntent.REVIEW_SEARCH:
         hint = "Tổng hợp nhận xét, phân biệt điểm tốt và chưa tốt nếu có."
     elif intent == QueryIntent.ROOM_SEARCH:
@@ -407,8 +446,6 @@ Câu hỏi: {standalone_q}
 Hướng dẫn bổ sung: {hint}"""
 
     system_content = _SYSTEM_PROMPT
-    if intent == QueryIntent.ITINERARY_SEARCH:
-        system_content += "\n\n" + _ITINERARY_RULES
 
     messages = [{"role": "system", "content": system_content}]
     from app.rag.manager import build_final_context_prompt
@@ -442,6 +479,52 @@ class RAGPipeline:
         summary_str = await loop.run_in_executor(None, self.conversation_manager.summarize_history, history)
         if summary_str:
             await db.update_session_summary(session_id, summary_str)
+
+    def _run_itinerary_planner(self, query: str) -> list[dict]:
+        """Tạo một khung lịch trình (plan skeleton) từ yêu cầu người dùng."""
+        messages = [
+            {"role": "system", "content": _ITINERARY_PLANNER_SYSTEM_PROMPT},
+            {"role": "user", "content": query},
+        ]
+        
+        fallback = [
+            {
+                "day": 1,
+                "slots": [
+                    {"session": "Sáng", "district": "hai chau", "theme": "vui chơi giải trí", "query": "địa điểm du lịch nổi tiếng hải châu", "collection_type": "place"},
+                    {"session": "Chiều", "district": "son tra", "theme": "tắm biển tham quan", "query": "bãi biển Mỹ Khê chùa linh ứng", "collection_type": "place"},
+                    {"session": "Tối", "district": "son tra", "theme": "hải sản ăn uống", "query": "quán ăn hải sản sơn trà ngon", "collection_type": "restaurant"}
+                ]
+            },
+            {
+                "day": 2,
+                "slots": [
+                    {"session": "Sáng", "district": "ngu hanh son", "theme": "tham quan leo núi", "query": "chùa non nước ngũ hành sơn", "collection_type": "place"},
+                    {"session": "Chiều", "district": "ngu hanh son", "theme": "vui chơi giải trí", "query": "phố cổ hội an hoặc bãi tắm ngũ hành sơn", "collection_type": "place"},
+                    {"session": "Tối", "district": "hai chau", "theme": "ăn vặt đường phố", "query": "chợ đêm helio chợ cồn hải châu", "collection_type": "restaurant"}
+                ]
+            }
+        ]
+
+        try:
+            completion = self.llm.create_chat_completion(
+                messages=messages,
+                max_tokens=3000,
+                temperature=0.0,
+                stream=False,
+            )
+            gen_text = completion["choices"][0]["message"]["content"].strip()
+
+            # extract JSON array
+            json_match = re.search(r'\[.*\]', gen_text, re.DOTALL)
+            raw = json_match.group(0) if json_match else gen_text
+            result = json.loads(raw)
+            if isinstance(result, list):
+                return result
+            return fallback
+        except Exception as exc:
+            print(f"[pipeline] itinerary_planner failed: {type(exc).__name__}: {exc}")
+            return fallback
 
     async def answer_stream(
         self,
@@ -569,45 +652,116 @@ class RAGPipeline:
         # 3. Retrieve bằng rewritten_query với top_k cao hơn để reranker có đủ candidates
         t_retrieve_start = time.perf_counter()
         skip_global_rerank = False
+        prebuilt_context = None
         
         if intent == QueryIntent.ITINERARY_SEARCH:
-            print("📚 [Itinerary Mode] Phân luồng tìm kiếm song song...")
-            q_places = f"địa điểm du lịch vui chơi tham quan {rewritten}"
-            q_rests = f"nhà hàng quán ăn đặc sản ngon {rewritten}"
-            q_hotels = f"khách sạn homestay resort lưu trú {rewritten}"
+            print("📅 [Itinerary Mode] Bắt đầu phân tích lịch trình và lập kế hoạch...")
+            plan = await loop.run_in_executor(None, self._run_itinerary_planner, standalone_q)
+            print(f"   Khung kế hoạch được tạo gồm {len(plan)} ngày")
             
-            async def _search_and_rerank(sub_q, sub_intent):
-                sub_res = await retrieve_by_intent(
-                    query=sub_q, client=self.client, encoder=self.encoder,
-                    intent=sub_intent, top_k_per_collection=config.TOP_K_RETRIEVE * 2,
-                    filters=merged, score_threshold=config.SCORE_THRESHOLD
-                )
-                if not sub_res:
-                    return []
-                
-                sub_k = 12 if sub_intent in [QueryIntent.PLACE_SEARCH, QueryIntent.RESTAURANT_SEARCH] else 6
-                
-                from app.rag.rerank import rerank_results
-                return await rerank_results(
-                    sub_res, sub_q, self.reranker,
-                    top_k=sub_k,
-                    score_threshold=config.RERANK_SCORE_THRESHOLD,
-                    intent=sub_intent,
-                    extracted=analysis
-                )
+            seen_itinerary_places = set()
+            all_itinerary_docs = []
+            structured_context_parts = []
             
-            res_pl, res_re, res_ho = await asyncio.gather(
-                _search_and_rerank(q_places, QueryIntent.PLACE_SEARCH),
-                _search_and_rerank(q_rests, QueryIntent.RESTAURANT_SEARCH),
-                _search_and_rerank(q_hotels, QueryIntent.HOTEL_SEARCH),
-            )
-            # Trộn xen kẽ (interleave) để đảm bảo LLM nhận được đủ cả Địa điểm, Nhà hàng, Khách sạn
-            # trong trường hợp bị giới hạn max_chars cắt mất phần cuối.
-            results = []
-            for i in range(max(len(res_pl), len(res_re), len(res_ho))):
-                if i < len(res_pl): results.append(res_pl[i])
-                if i < len(res_re): results.append(res_re[i])
-                if i < len(res_ho): results.append(res_ho[i])
+            for day_info in plan:
+                day_num = day_info.get("day", 1)
+                slots = day_info.get("slots", [])
+                
+                print(f"\n   📅 Ngày {day_num}:")
+                for slot in slots:
+                    session = slot.get("session", "")
+                    district = slot.get("district")
+                    theme = slot.get("theme", "")
+                    slot_query = slot.get("query", "")
+                    col_type = slot.get("collection_type", "place")
+                    
+                    print(f"     * Buổi {session} ({district or 'Tự do'} - {theme}): {slot_query!r}")
+                    
+                    slot_intent = QueryIntent.PLACE_SEARCH
+                    if col_type == "restaurant":
+                        slot_intent = QueryIntent.RESTAURANT_SEARCH
+                    elif col_type == "hotel":
+                        slot_intent = QueryIntent.HOTEL_SEARCH
+                        
+                    slot_filters = merged.copy() if merged else {}
+                    if district:
+                        slot_filters["district"] = district
+                        
+                    raw_docs = await retrieve_by_intent(
+                        query=slot_query,
+                        client=self.client,
+                        encoder=self.encoder,
+                        intent=slot_intent,
+                        top_k_per_collection=6,
+                        filters=slot_filters,
+                        score_threshold=config.SCORE_THRESHOLD,
+                    )
+                    
+                    ranked_docs = await rerank_results(
+                        results=raw_docs,
+                        query=slot_query,
+                        reranker=self.reranker,
+                        top_k=4,
+                        score_threshold=config.RERANK_SCORE_THRESHOLD,
+                        intent=slot_intent,
+                        extracted={"filters": slot_filters}
+                    )
+                    
+                    slot_selected_docs = []
+                    for doc in ranked_docs:
+                        name = doc.get_display_name().lower().strip()
+                        if name and name not in seen_itinerary_places:
+                            seen_itinerary_places.add(name)
+                            slot_selected_docs.append(doc)
+                            break
+                            
+                    if not slot_selected_docs and district:
+                        print(f"       ⚠️ Không tìm thấy địa điểm khớp quận {district}. Tìm kiếm mở rộng...")
+                        slot_filters_no_dist = slot_filters.copy()
+                        slot_filters_no_dist["district"] = None
+                        
+                        raw_docs_no_dist = await retrieve_by_intent(
+                            query=slot_query,
+                            client=self.client,
+                            encoder=self.encoder,
+                            intent=slot_intent,
+                            top_k_per_collection=6,
+                            filters=slot_filters_no_dist,
+                            score_threshold=config.SCORE_THRESHOLD,
+                        )
+                        
+                        ranked_docs_no_dist = await rerank_results(
+                            results=raw_docs_no_dist,
+                            query=slot_query,
+                            reranker=self.reranker,
+                            top_k=4,
+                            score_threshold=config.RERANK_SCORE_THRESHOLD,
+                            intent=slot_intent,
+                            extracted={"filters": slot_filters_no_dist}
+                        )
+                        
+                        for doc in ranked_docs_no_dist:
+                            name = doc.get_display_name().lower().strip()
+                            if name and name not in seen_itinerary_places:
+                                seen_itinerary_places.add(name)
+                                slot_selected_docs.append(doc)
+                                break
+                                
+                    all_itinerary_docs.extend(slot_selected_docs)
+                    
+                    slot_context_str = _format_context(slot_selected_docs, max_items=1, max_chars=1000)
+                    
+                    slot_block = (
+                        f"=== Ngày {day_num} - Buổi {session} ===\n"
+                        f"Quận dự kiến: {district or 'Không chỉ định'}\n"
+                        f"Chủ đề hoạt động: {theme}\n"
+                        f"Thông tin địa điểm thực tế gợi ý từ database:\n"
+                        f"{slot_context_str if slot_context_str.strip() else 'Không tìm thấy địa điểm thực tế phù hợp.'}"
+                    )
+                    structured_context_parts.append(slot_block)
+            
+            prebuilt_context = "\n\n".join(structured_context_parts)
+            results = all_itinerary_docs
             skip_global_rerank = True
         else:
             results = await retrieve_by_intent(
@@ -740,7 +894,9 @@ class RAGPipeline:
                 # Chưa committed → client chưa thấy gì về Gemini, fall through im lặng.
 
         # 4. Build prompt (hiển thị standalone_q gốc cho UX) — rẽ nhánh theo intent
-        messages = _with_profile(_build_messages(standalone_q, results, history, intent, session_summary))
+        messages = _with_profile(_build_messages(
+            standalone_q, results, history, intent, session_summary, prebuilt_context=prebuilt_context
+        ))
         prompt_chars = sum(len(m["content"]) for m in messages)
         print(f"[TIMING] prompt_built: {prompt_chars} chars across {len(messages)} msgs")
 

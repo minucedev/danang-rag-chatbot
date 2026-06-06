@@ -144,11 +144,27 @@ class SearchResultSchema(BaseModel):
         return "Unknown"
 
     def get_price_display(self) -> str:
-        if self.min_price is None:
-            return "Không có thông tin giá"
-        if self.max_price and self.max_price > self.min_price:
-            return f"{self.min_price:,.0f} - {self.max_price:,.0f} VND"
-        return f"{self.min_price:,.0f} VND"
+        parts = []
+        if self.min_price is not None:
+            if self.min_price == 0 and (not self.max_price or self.max_price == 0):
+                parts.append("Miễn phí")
+            elif self.max_price and self.max_price > self.min_price:
+                parts.append(f"{self.min_price:,.0f} - {self.max_price:,.0f} VND")
+            else:
+                parts.append(f"{self.min_price:,.0f} VND")
+                
+        if getattr(self, 'price_avg_vnd', None) is not None:
+            parts.append(f"Trung bình {self.price_avg_vnd:,.0f} VND")
+        
+        if getattr(self, 'price_range_raw', None):
+            parts.append(f"{self.price_range_raw}")
+            
+        if getattr(self, 'price_level', None) and self.price_level != 'unknown' and not parts:
+            parts.append(f"Mức giá: {self.price_level}")
+            
+        if parts:
+            return " | ".join(parts)
+        return "Không có thông tin giá"
 
     def get_rating_display(self) -> str:
         rating_value = self.parent_rating if self.parent_rating else self.rating
