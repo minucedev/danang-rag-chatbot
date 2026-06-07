@@ -26,8 +26,12 @@ async def init_db() -> None:
     for _col, _decl in (("user_id", "TEXT"), ("summary", "TEXT")):
         try:
             await _db.execute(f"ALTER TABLE sessions ADD COLUMN {_col} {_decl}")
-        except aiosqlite.OperationalError:
-            pass  # cột đã tồn tại
+        except aiosqlite.OperationalError as exc:
+            # CHỈ nuốt trường hợp idempotent "cột đã tồn tại". Các lỗi khác cùng kiểu
+            # OperationalError (no such table / database is locked / corrupt) là sự cố thật
+            # → re-raise thay vì giấu để app khởi động "sạch" trên DB hỏng.
+            if "duplicate column name" not in str(exc).lower():
+                raise
     await _db.commit()
 
 

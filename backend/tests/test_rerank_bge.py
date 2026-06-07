@@ -81,6 +81,28 @@ async def test_below_threshold_fallback_for_general_intent():
     assert len(out) == 2  # fallback: trả ranked dù below threshold
 
 
+async def test_general_intent_ignores_threshold_with_mixed_scores():
+    """GENERAL: threshold bị BỎ QUA hoàn toàn — kể cả khi có kết quả dưới ngưỡng vẫn trả đủ.
+    sigmoid(2.0)≈0.881 (trên 0.6) và sigmoid(-2.0)≈0.119 (dưới 0.6) → cả hai vẫn được trả."""
+    results = [_make_result("High"), _make_result("Low")]
+    reranker = _mock_reranker([2.0, -2.0])
+    out = await rerank_results(
+        results, "query", reranker, top_k=5, score_threshold=0.6,
+        intent=QueryIntent.GENERAL,
+    )
+    assert [r.entity_name for r in out] == ["High", "Low"]  # không lọc, giữ thứ tự điểm
+
+
+async def test_sigmoid_normalization_on_array_with_negative_logits():
+    """Mảng nhiều logit (gồm âm) → mỗi điểm = sigmoid(logit); heuristic no-op khi không filter."""
+    results = [_make_result("Neg"), _make_result("Pos")]
+    reranker = _mock_reranker([-2.0, 2.0])
+    out = await rerank_results(results, "query", reranker, top_k=5, score_threshold=0.0)
+    assert out[0].entity_name == "Pos"  # sigmoid đơn điệu → giữ đúng thứ tự
+    assert abs(out[0].score - _sigmoid(2.0)) < 1e-6
+    assert abs(out[1].score - _sigmoid(-2.0)) < 1e-6
+
+
 async def test_below_threshold_no_fallback_for_specific_search():
     """SPECIFIC_SEARCH: không trả junk khi below threshold — exact_name_search sẽ xử lý."""
     results = [_make_result("Unrelated")]

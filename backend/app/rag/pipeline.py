@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import json
+import logging
 import re
 import threading
 import time
@@ -24,6 +25,8 @@ from app.rag.events_retrieval import retrieve_events, format_events_context
 from app.utils.nfc import normalize_nfc
 from app.db.missed_queries import log_missed_query
 from app.db import qa_cache
+
+logger = logging.getLogger("app.rag.pipeline")
 
 # Intents có thể crawl được địa điểm thực tế — log khi miss
 _CRAWLABLE_INTENTS = {
@@ -54,8 +57,10 @@ async def _store_qa_cache(question, qvec, answer, intent, merged, sources) -> No
             question, qvec, answer, intent.value, merged,
             json.dumps(sources, ensure_ascii=False),
         )
-    except Exception as exc:
-        print(f"[pipeline] qa_cache store failed: {type(exc).__name__}: {exc}")
+    except Exception:
+        # Best-effort: câu trả lời đã stream xong nên ghi cache hỏng KHÔNG được làm vỡ request.
+        # Vẫn log ERROR (có exc_info) để cache rỗng kéo dài không bị âm thầm.
+        logger.error("qa_cache store failed (degrading silently)", exc_info=True)
 
 _SYSTEM_PROMPT = (
     "Bạn là trợ lý du lịch Đà Nẵng thông minh, nhiệt tình và am hiểu địa phương.\n"
@@ -762,8 +767,11 @@ class RAGPipeline:
             )
             try:
                 hit = await qa_cache.find_similar(qvec, intent.value, merged)
-            except Exception as exc:
-                print(f"[pipeline] qa_cache lookup failed: {type(exc).__name__}: {exc}")
+            except Exception:
+                # Best-effort: lookup hỏng (DB chưa init, lock, vector sai chiều…) → degrade thành
+                # miss (vẫn retrieve + Gemini) để KHÔNG làm vỡ câu trả lời. Nhưng log ERROR có
+                # exc_info để cache hỏng cấu hình không âm thầm "luôn miss" (chỉ thấy qua chi phí).
+                logger.error("qa_cache lookup failed (degrading to miss)", exc_info=True)
                 hit = None
             if hit:
                 cached_sources = json.loads(hit["sources_json"]) if hit["sources_json"] else []
