@@ -21,16 +21,16 @@ _SHELL_HTML = """<!DOCTYPE html>
     html, body { margin: 0; height: 100%; font-family: Inter, system-ui, Arial, sans-serif; }
     .tabbar {
       display: flex; align-items: center; gap: 8px;
-      height: 52px; padding: 0 16px; background: #0f172a; border-bottom: 1px solid #1e293b;
+      height: 52px; padding: 0 16px; background: #ffffff; border-bottom: 1px solid #e4e7ec;
     }
-    .tabbar .brand { color: #e2e8f0; font-weight: 700; margin-right: auto; font-size: 15px; }
+    .tabbar .brand { color: #1e2330; font-weight: 700; margin-right: auto; font-size: 15px; }
     .tabbar button {
       padding: 8px 18px; border: 0; border-radius: 8px; cursor: pointer;
       font-weight: 600; font-size: 14px; transition: background .15s, color .15s;
     }
-    .tabbar button.active { background: #2563eb; color: #fff; }
-    .tabbar button:not(.active) { background: #1e293b; color: #94a3b8; }
-    .tabbar button:not(.active):hover { background: #334155; color: #cbd5e1; }
+    .tabbar button.active { background: #6c5ce7; color: #fff; }
+    .tabbar button:not(.active) { background: #f1f2f5; color: #6b7280; }
+    .tabbar button:not(.active):hover { background: #e7e9ee; color: #1e2330; }
     iframe { border: 0; width: 100%; height: calc(100vh - 52px); display: block; }
     .hidden { display: none; }
   </style>
