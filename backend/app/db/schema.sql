@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
     username      TEXT    NOT NULL UNIQUE,
     password_hash TEXT    NOT NULL,             -- pbkdf2_hmac sha256, hex
     password_salt TEXT    NOT NULL,             -- 16 byte, hex
+    role          TEXT    NOT NULL DEFAULT 'user',  -- 'user' | 'admin'
     created_at    INTEGER NOT NULL
 );
 

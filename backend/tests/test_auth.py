@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.deps import get_current_user
+from app.api import auth as auth_api
 from app.db import auth as auth_db
 from app.db import sessions as session_db
 
@@ -42,7 +43,7 @@ async def test_token_issue_and_lookup(tmp_db):
     uid = await auth_db.create_user("carol", "pw")
     token = await auth_db.issue_token(uid)
     user = await auth_db.get_user_by_token(token)
-    assert user == {"id": uid, "username": "carol"}
+    assert user == {"id": uid, "username": "carol", "role": "user"}
 
 
 async def test_token_revoke(tmp_db):
@@ -80,6 +81,46 @@ async def test_get_current_user_valid(tmp_db):
     token = await auth_db.issue_token(uid)
     user = await get_current_user(authorization=f"Bearer {token}")
     assert user["id"] == uid
+
+
+# ─── Role & đăng ký ──────────────────────────────────────────────────────────
+async def test_create_user_with_role(tmp_db):
+    await auth_db.create_user("root", "pw", role="admin")
+    got = await auth_db.get_user_by_username("root")
+    assert got["role"] == "admin"
+
+
+async def test_default_role_is_user(tmp_db):
+    await auth_db.create_user("guest1", "pw")
+    assert (await auth_db.get_user_by_username("guest1"))["role"] == "user"
+
+
+async def test_set_user_role_promotes(tmp_db):
+    await auth_db.create_user("promote_me", "pw")
+    assert await auth_db.set_user_role("promote_me", "admin") is True
+    assert (await auth_db.get_user_by_username("promote_me"))["role"] == "admin"
+    assert await auth_db.set_user_role("nobody", "admin") is False
+
+
+async def test_register_creates_user_role_and_token(tmp_db):
+    out = await auth_api.register(auth_api.RegisterBody(username="newbie", password="secret6"))
+    assert out.user.role == "user" and out.user.username == "newbie"
+    # token trả về dùng được ngay
+    who = await auth_db.get_user_by_token(out.token)
+    assert who["id"] == out.user.id
+
+
+async def test_register_duplicate_conflict(tmp_db):
+    await auth_db.create_user("taken", "pw")
+    with pytest.raises(HTTPException) as ei:
+        await auth_api.register(auth_api.RegisterBody(username="taken", password="secret6"))
+    assert ei.value.status_code == 409
+
+
+async def test_login_returns_role(tmp_db):
+    await auth_db.create_user("withrole", "pw", role="admin")
+    out = await auth_api.login(auth_api.LoginBody(username="withrole", password="pw"))
+    assert out.user.role == "admin"
 
 
 # ─── Cách ly session theo user ───────────────────────────────────────────────

@@ -34,22 +34,35 @@ def verify_password(password: str, hash_hex: str, salt_hex: str) -> bool:
 
 
 # ─── Users ───────────────────────────────────────────────────────────────────
-async def create_user(username: str, password: str) -> str:
+async def create_user(username: str, password: str, role: str = "user") -> str:
     """Tạo user, trả id. Raise nếu username đã tồn tại (UNIQUE)."""
     uid = str(uuid.uuid4())
     h, s = hash_password(password)
     await _db_conn().execute(
-        "INSERT INTO users (id, username, password_hash, password_salt, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (uid, username, h, s, int(time.time())),
+        "INSERT INTO users (id, username, password_hash, password_salt, role, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (uid, username, h, s, role, int(time.time())),
     )
     await _db_conn().commit()
     return uid
 
 
+async def set_user_role(username: str, role: str) -> bool:
+    """Cập nhật role cho user đã tồn tại. Trả True nếu có dòng bị ĐỔI giá trị.
+
+    Lưu ý: SQLite rowcount=0 cả khi user đã có sẵn đúng role đó (no-op) → False KHÔNG
+    đồng nghĩa "user không tồn tại". Caller cần check tồn tại riêng nếu muốn phân biệt.
+    """
+    cur = await _db_conn().execute(
+        "UPDATE users SET role = ? WHERE username = ?", (role, username)
+    )
+    await _db_conn().commit()
+    return cur.rowcount > 0
+
+
 async def get_user_by_username(username: str) -> Optional[dict]:
     async with _db_conn().execute(
-        "SELECT id, username, password_hash, password_salt FROM users WHERE username = ?",
+        "SELECT id, username, password_hash, password_salt, role FROM users WHERE username = ?",
         (username,),
     ) as cur:
         row = await cur.fetchone()
@@ -75,9 +88,9 @@ async def issue_token(user_id: str, ttl_seconds: int = _TOKEN_TTL_SECONDS) -> st
 
 
 async def get_user_by_token(token: str) -> Optional[dict]:
-    """Tra user qua token còn hạn. Trả {id, username} hoặc None."""
+    """Tra user qua token còn hạn. Trả {id, username, role} hoặc None."""
     async with _db_conn().execute(
-        "SELECT u.id, u.username, t.expires_at "
+        "SELECT u.id, u.username, u.role, t.expires_at "
         "FROM auth_tokens t JOIN users u ON u.id = t.user_id "
         "WHERE t.token_hash = ?",
         (_hash_token(token),),
@@ -87,7 +100,7 @@ async def get_user_by_token(token: str) -> Optional[dict]:
         return None
     if row["expires_at"] is not None and row["expires_at"] < int(time.time()):
         return None
-    return {"id": row["id"], "username": row["username"]}
+    return {"id": row["id"], "username": row["username"], "role": row["role"]}
 
 
 async def revoke_token(token: str) -> None:

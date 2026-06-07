@@ -22,10 +22,15 @@ async def init_db() -> None:
     schema = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
     await _db.executescript(schema)
     # Migration idempotent cho DB cũ: schema.sql dùng CREATE TABLE IF NOT EXISTS nên KHÔNG
-    # thêm cột vào bảng sessions đã tồn tại → ALTER thủ công, bỏ qua nếu cột đã có.
-    for _col, _decl in (("user_id", "TEXT"), ("summary", "TEXT")):
+    # thêm cột mới vào bảng đã tồn tại (sessions, users) → ALTER thủ công từng (bảng, cột),
+    # bỏ qua nếu cột đã có.
+    for _table, _col, _decl in (
+        ("sessions", "user_id", "TEXT"),
+        ("sessions", "summary", "TEXT"),
+        ("users", "role", "TEXT NOT NULL DEFAULT 'user'"),
+    ):
         try:
-            await _db.execute(f"ALTER TABLE sessions ADD COLUMN {_col} {_decl}")
+            await _db.execute(f"ALTER TABLE {_table} ADD COLUMN {_col} {_decl}")
         except aiosqlite.OperationalError as exc:
             # CHỈ nuốt trường hợp idempotent "cột đã tồn tại". Các lỗi khác cùng kiểu
             # OperationalError (no such table / database is locked / corrupt) là sự cố thật

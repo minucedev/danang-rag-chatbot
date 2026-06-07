@@ -8,17 +8,19 @@ import { getToken, setToken, clearToken } from "@/lib/auth";
 export interface AuthUser {
   id: string;
   username: string;
+  role: string;
 }
 
 interface AuthContextValue {
   user: AuthUser | null;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-const PUBLIC_ROUTES = ["/login"];
+const PUBLIC_ROUTES = ["/login", "/register"];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -66,6 +68,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.replace("/chat");
   }
 
+  async function register(username: string, password: string) {
+    const res = await apiFetch<{ token: string; user: AuthUser }>("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    setToken(res.token);
+    setHasToken(true);
+    qc.setQueryData(["me"], res.user);
+    router.replace("/chat");
+  }
+
   async function logout() {
     try {
       await apiFetch("/api/auth/logout", { method: "POST" });
@@ -82,6 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     user: meQuery.data ?? null,
     isLoading: hasToken === null || (hasToken === true && meQuery.isLoading),
     login,
+    register,
     logout,
   };
 

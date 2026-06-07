@@ -101,6 +101,7 @@ from app.api import auth as auth_api
 from app.api import admin_shell
 from app.api import crawl_admin as crawl_admin_api
 from app.api import metrics_admin
+from app.api import admin_auth
 
 
 @asynccontextmanager
@@ -235,9 +236,13 @@ app.include_router(admin.router)
 app.include_router(events.router)
 app.include_router(favorites.router)
 app.include_router(itineraries.router)
+app.include_router(admin_auth.router)
 app.include_router(admin_shell.router)
 app.include_router(crawl_admin_api.router)
 app.include_router(metrics_admin.router)
+
+# Gác cookie cho toàn bộ /admin* (trừ login/logout/static). Đăng ký sau router.
+app.middleware("http")(admin_auth.admin_guard)
 
 # Static cho dashboard crawl (style.css) — phục vụ tại /admin/crawl/static/*
 app.mount(
