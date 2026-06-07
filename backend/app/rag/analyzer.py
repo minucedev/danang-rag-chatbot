@@ -146,8 +146,35 @@ class LLMQueryAnalyzer:
     def _empty_filters() -> dict:
         """Filter rỗng đầy đủ key — dùng cho fallback và làm base cho _clean_filters."""
         f: dict = {
-            "district": None, "min_rating": None, "max_price": None, "min_price": None,
-            "star_rating": None, "price_level": None, "has_discount": None,
+            "district": None,
+            "min_rating": None,
+            "max_price": None,
+            "min_price": None,
+            "star_rating": None,
+            "price_level": None,
+            "has_discount": None,
+            
+            # Extended restaurant / place filters
+            "price_avg_vnd": None,
+            "price_score": None,
+            "quality_score": None,
+            "service_score": None,
+            "space_score": None,
+            "location_score": None,
+            "weather_dependent": None,
+            
+            # Extended hotel / room filters
+            "check_in_time": None,
+            "check_out_time": None,
+            "room_count": None,
+            "max_capacity": None,
+            "image_count": None,
+            "room_capacity": None,
+            "area_m2": None,
+            
+            # Review / sentiment filters
+            "sentiment_preference": None,
+            "recency_min": None,
         }
         for k in _LIST_FILTER_KEYS:
             f[k] = []
@@ -169,12 +196,51 @@ class LLMQueryAnalyzer:
         f["price_level"] = _normalize_price_level(raw.get("price_level"))
         f["has_discount"] = _normalize_bool(raw.get("has_discount"))
 
+        # Extended restaurant / place filters
+        f["price_avg_vnd"] = self._clean_price(raw.get("price_avg_vnd"))
+        f["price_score"] = _to_float(raw.get("price_score"))
+        f["quality_score"] = _to_float(raw.get("quality_score"))
+        f["service_score"] = _to_float(raw.get("service_score"))
+        f["space_score"] = _to_float(raw.get("space_score"))
+        f["location_score"] = _to_float(raw.get("location_score"))
+        
+        if raw.get("weather_dependent") is not None:
+            wd = str(raw["weather_dependent"]).strip().lower()
+            if wd in {"có", "co", "yes", "true", "1"}:
+                f["weather_dependent"] = "có"
+            elif wd in {"không", "khong", "no", "false", "0"}:
+                f["weather_dependent"] = "không"
+            else:
+                f["weather_dependent"] = None
+
+        # Extended hotel / room filters
+        f["check_in_time"] = raw.get("check_in_time")
+        f["check_out_time"] = raw.get("check_out_time")
+        f["room_count"] = _to_int(raw.get("room_count"))
+        f["max_capacity"] = _to_int(raw.get("max_capacity"))
+        f["image_count"] = _to_int(raw.get("image_count"))
+        f["room_capacity"] = _to_int(raw.get("room_capacity"))
+        f["area_m2"] = _to_float(raw.get("area_m2"))
+
+        # Review / sentiment filters
+        if raw.get("sentiment_preference"):
+            sp = str(raw["sentiment_preference"]).strip().lower()
+            if sp in {"positive", "tich cuc", "tích cực"}:
+                f["sentiment_preference"] = "positive"
+            elif sp in {"neutral", "trung lap", "trung lập"}:
+                f["sentiment_preference"] = "neutral"
+            elif sp in {"negative", "tieu cuc", "tiêu cực"}:
+                f["sentiment_preference"] = "negative"
+            else:
+                f["sentiment_preference"] = None
+        f["recency_min"] = _to_float(raw.get("recency_min"))
+
         for key in _LIST_FILTER_KEYS:
             f[key] = _split_tokens(raw.get(key))
 
         return f
 
-    def analyze(self, query: str) -> dict:
+    def analyze(self, query: str, history: Optional[list[dict]] = None) -> dict:
         """Sử dụng LLM kèm Few-shot để phân tích ngữ nghĩa chính xác cấu trúc JSON"""
 
         # System prompt: gộp Router (phân loại + needs_rag) và Extractor (filter giàu).
@@ -183,10 +249,11 @@ class LLMQueryAnalyzer:
             "Chỉ trả về DUY NHẤT một khối JSON. Không giải thích, không markdown.\n\n"
             "QUY TẮC PHÂN LOẠI ƯU TIÊN:\n"
             "1. BẤT KỲ câu hỏi nào nhắc đến TÊN RIÊNG của thực thể (vd 'Chợ Cồn', 'Novotel Đà Nẵng', "
-            "'Hải sản Năm Đảnh', 'Bà Nà Hills', 'A La Carte') đều BẮT BUỘC là intent 'specific_search', "
+            "'Hải sản Năm Đảnh', 'Bà Nà Hills', 'A La Carte') hoặc thừa hưởng/tiếp nối từ thực thể "
+            "đang được nói đến trong lịch sử hội thoại gần đây đều BẮT BUỘC là intent 'specific_search', "
             "kể cả khi hỏi địa chỉ/giờ mở cửa/phòng/review hay so sánh nhiều thực thể.\n"
             "2. Chỉ dùng 'hotel_search'/'restaurant_search'/'place_search'/'room_search' cho tìm kiếm "
-            "CHUNG CHUNG (không nêu tên cụ thể).\n"
+            "CHUNG CHUNG (không nêu tên cụ thể và không có ngữ cảnh thực thể trước đó).\n"
             "3. 'needs_rag'=false CHỈ khi là chitchat/ngoài phạm vi du lịch Đà Nẵng "
             "(vd thời tiết, vé máy bay, 'bạn là ai').\n"
             "4. Câu hỏi về 'sự kiện/lễ hội/hoạt động/có gì chơi/có gì diễn ra' (thường kèm thời gian "
@@ -195,27 +262,24 @@ class LLMQueryAnalyzer:
             "{\n"
             '  "needs_rag": true | false,\n'
             '  "intent": "hotel_search" | "restaurant_search" | "place_search" | "room_search" | "review_search" | "event_search" | "itinerary_search" | "specific_search" | "chitchat" | "general",\n'
-            '  "entity": ["tên riêng cụ thể được nhắc đến, [] nếu không có"],\n'
+            '  "entity": ["tên riêng cụ thể được nhắc đến hoặc được kế thừa từ lịch sử hội thoại, [] nếu không có"],\n'
             '  "rewritten_query": "từ khóa ngắn để tạo embedding. KHÔNG chứa tên quận, giá, số sao, từ \'Đà Nẵng\', \'ở đâu\', \'mấy giờ\', \'review\'",\n'
-            '  "filters": {\n'
-            '    "district": "hai chau" | "son tra" | "thanh khe" | "ngu hanh son" | "cam le" | "hoa vang" | "lien chieu" | null,\n'
-            '    "min_rating": "float thang 1-10. \'trên 8 điểm\'->8.0; theo sao \'4.5 sao\'->9.0 (số sao * 2)" | null,\n'
-            '    "max_price": "int VND. \'1 triệu\'->1000000, \'500k\'->500000" | null,\n'
-            '    "min_price": int_VND | null,\n'
-            '    "star_rating": "int 1-5, số sao khách sạn" | null,\n'
-            '    "price_level": "low" | "mid" | "high" | null,\n'
-            '    "cuisine": ["vd hải sản, mì quảng, lẩu, cà phê"],\n'
-            '    "restaurant_type": ["vd buffet, quán ăn, nhà hàng, café"],\n'
-            '    "restaurant_category": [], "suitable_for": ["vd gia đình, cặp đôi, nhóm bạn"],\n'
-            '    "best_time_to_visit": ["vd sáng, tối, cuối tuần"], "visit_duration": ["vd 1-2 giờ, cả ngày"],\n'
-            '    "tags": ["vd sống ảo, check-in, view biển, tâm linh"],\n'
-            '    "room_view": ["vd sea view, city view"], "bed_type": ["vd double bed, king bed"],\n'
-            '    "amenities_room": ["vd wifi, bathtub, balcony"],\n'
-            '    "cancellation_policy": [], "children_policy": [], "has_discount": true | false | null\n'
-            "  }\n"
+            '  "filters": { "CHỈ ĐIỀN CÁC KEY BỘ LỌC CÓ GIÁ TRỊ. KHÔNG IN RA CÁC KEY NULL HAY [] ĐỂ TIẾT KIỆM THỜI GIAN" }\n'
             "}\n"
-            "Chỉ điền filter khi câu hỏi nêu rõ; còn lại để null hoặc []."
+            "Các key bộ lọc hợp lệ (chỉ dùng khi câu hỏi có nhắc đến):\n"
+            "district, min_rating, max_price, min_price, star_rating, price_level, cuisine, restaurant_type, restaurant_category, price_avg_vnd, price_score, quality_score, service_score, space_score, location_score, suitable_for, best_time_to_visit, visit_duration, tags, weather_dependent, check_in_time, check_out_time, cancellation_policy, children_policy, has_discount, room_count, max_capacity, image_count, room_capacity, bed_type, area_m2, room_view, amenities_room, sentiment_preference, recency_min."
         )
+
+        history_str = ""
+        if history:
+            history_messages = []
+            for msg in history[-6:]:
+                role_display = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
+                content = msg.get("content") or ""
+                if len(content) > 300:
+                    content = content[:300] + "..."
+                history_messages.append(f"{role_display}: {content}")
+            history_str = "\n".join(history_messages)
 
         # Few-shot: dạy teencode, hướng giá (đổ lại/trở lên), needs_rag, entity, filter giàu.
         user_prompt = f"""Hãy phân tích câu hỏi người dùng sau đây dựa trên các ví dụ mẫu:
@@ -341,6 +405,69 @@ Trả về JSON:
   "filters": {{"best_time_to_visit": ["cuối tuần"]}}
 }}
 
+### VÍ DỤ 12:
+Người dùng: "Khách hàng nhận xét thế nào về quán hải sản Năm Đảnh?"
+Trả về JSON:
+{{
+  "needs_rag": true,
+  "intent": "specific_search",
+  "entity": ["Hải sản Năm Đảnh"],
+  "rewritten_query": "Hải sản Năm Đảnh",
+  "filters": {{}}
+}}
+
+### VÍ DỤ 13 (CÓ LỊCH SỬ HỘI THOẠI):
+Lịch sử hội thoại:
+Người dùng: Khách hàng nhận xét thế nào về quán hải sản Năm Đảnh?
+Trợ lý: Quán hải sản Năm Đảnh được đánh giá cao...
+Người dùng: "vậy quán này mở cửa lúc mấy giờ"
+Trả về JSON:
+{{
+  "needs_rag": true,
+  "intent": "specific_search",
+  "entity": ["Hải sản Năm Đảnh"],
+  "rewritten_query": "Hải sản Năm Đảnh giờ mở cửa",
+  "filters": {{}}
+}}
+
+### VÍ DỤ 14 (CÓ LỊCH SỬ HỘI THOẠI):
+Lịch sử hội thoại:
+Người dùng: tôi muốn biết nhận xét của khách hàng về Le Sands Oceanfront Danang Hotel
+Trợ lý: Khách hàng rất hài lòng với Le Sands Oceanfront Danang Hotel...
+Người dùng: "vậy khách sạn có những loại phòng nào"
+Trả về JSON:
+{{
+  "needs_rag": true,
+  "intent": "specific_search",
+  "entity": ["Le Sands Oceanfront Danang Hotel"],
+  "rewritten_query": "Le Sands Oceanfront Danang Hotel loại phòng",
+  "filters": {{}}
+}}
+
+### VÍ DỤ 15 (HỎI CHUNG CHUNG KHI CÓ LỊCH SỬ):
+Lịch sử hội thoại:
+Người dùng: tôi muốn biết nhận xét của khách hàng về Le Sands Oceanfront Danang Hotel
+Trợ lý: Khách hàng rất hài lòng với Le Sands Oceanfront Danang Hotel...
+Người dùng: "khách sạn nào ở Hải Châu có bể bơi"
+Trả về JSON:
+{{
+  "needs_rag": true,
+  "intent": "hotel_search",
+  "entity": [],
+  "rewritten_query": "khách sạn có bể bơi",
+  "filters": {{"district": "hai chau"}}
+}}
+"""
+
+        if history_str:
+            user_prompt += f"""
+### BÀI TẬP THỰC TẾ (CÓ LỊCH SỬ HỘI THOẠI):
+Lịch sử hội thoại:
+{history_str}
+Người dùng: "{query}"
+Trả về JSON:"""
+        else:
+            user_prompt += f"""
 ### BÀI TẬP THỰC TẾ:
 Người dùng: "{query}"
 Trả về JSON:"""

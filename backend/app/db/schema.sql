@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     title       TEXT    NOT NULL,
     user_id     TEXT,                           -- chủ sở hữu (NULL = chat ẩn danh cũ, vô chủ)
     created_at  INTEGER NOT NULL,
-    updated_at  INTEGER NOT NULL
+    updated_at  INTEGER NOT NULL,
+    summary     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, updated_at);
 

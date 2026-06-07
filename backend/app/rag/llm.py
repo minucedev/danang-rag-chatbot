@@ -1,7 +1,9 @@
 from __future__ import annotations
 import asyncio
+import os
 import re
 import threading
+from pathlib import Path
 from typing import AsyncIterator, Iterator
 
 import torch
@@ -101,6 +103,76 @@ class QwenHF:
                 yield {"choices": [{"delta": {"content": chunk}}]}
 
 
+class QwenGGUF:
+    """llama-cpp-python Llama wrapper mimicking QwenHF interface.
+
+    Expose create_chat_completion() để analyzer.py và pipeline.py không cần thay đổi.
+    """
+
+    def __init__(self, model_path: str, n_ctx: int, n_gpu_layers: int) -> None:
+        try:
+            from llama_cpp import Llama
+        except ImportError as exc:
+            raise ImportError(
+                "llama-cpp-python is not installed. Please run `pip install llama-cpp-python` to use GGUF models."
+            ) from exc
+
+        self.model_path = model_path
+        self.n_ctx = n_ctx
+        self.n_gpu_layers = n_gpu_layers
+
+        kwargs = dict(
+            model_path=model_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            n_batch=512,
+            verbose=False,
+        )
+        try:
+            self.model = Llama(**kwargs, chat_format="qwen")
+        except ValueError:
+            # llama-cpp-python < 0.2.85 chưa có preset "qwen" — fallback chatml.
+            self.model = Llama(**kwargs, chat_format="chatml")
+
+    def create_chat_completion(
+        self,
+        messages: list[dict],
+        max_tokens: int,
+        temperature: float = 0.2,
+        stream: bool = False,
+        **kwargs,
+    ):
+        if not stream:
+            res = self.model.create_chat_completion(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=stream,
+                **kwargs,
+            )
+            content = res["choices"][0]["message"]["content"]
+            res["choices"][0]["message"]["content"] = re.sub(r"<think>[\s\S]*?</think>", "", content).strip()
+            return res
+        else:
+            return self.model.create_chat_completion(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=stream,
+                **kwargs,
+            )
+
+
+def get_gguf_absolute_path(path: str) -> str:
+    if os.path.isabs(path):
+        return path
+    backend_dir = Path(__file__).resolve().parent.parent
+    candidate = backend_dir / path
+    if candidate.exists():
+        return str(candidate.resolve())
+    return path
+
+
 def _build_load_kwargs(device: str, dtype, use_4bit: bool = False) -> dict:
     """Tạo kwargs load model, tuỳ chọn 4-bit quantization."""
     kwargs = dict(device_map="auto", trust_remote_code=True)
@@ -143,8 +215,6 @@ def _load_model_from_name(
     is_vlm=True: dùng AutoModelForImageTextToText (vision-language model)
     is_vlm=False: dùng AutoModelForCausalLM (text-only model)
     """
-    import os
-
     is_local = os.path.isdir(model_name)
     load_kwargs = _build_load_kwargs(device, dtype, use_4bit)
 
@@ -163,8 +233,16 @@ def _load_model_from_name(
     return QwenHF(model=model, processor=processor, device=device)
 
 
-def load_llm() -> QwenHF:
-    """Load generator LLM (text-only, model từ config.LLM_HF_MODEL_NAME, optional 4-bit)."""
+def load_llm() -> QwenHF | QwenGGUF:
+    """Load generator LLM (text-only Qwen, optional 4-bit, supports HF and GGUF)."""
+    if config.USE_GGUF:
+        print(f"Loading local GGUF model via llama.cpp: {config.LLM_GGUF_PATH}")
+        return QwenGGUF(
+            model_path=get_gguf_absolute_path(config.LLM_GGUF_PATH),
+            n_ctx=config.LLM_N_CTX,
+            n_gpu_layers=config.LLM_N_GPU_LAYERS,
+        )
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
     return _load_model_from_name(
@@ -172,8 +250,16 @@ def load_llm() -> QwenHF:
     )
 
 
-def load_analyzer_llm() -> QwenHF:
-    """Load analyzer LLM (Qwen2.5-0.5B-Instruct text-only, không dùng 4-bit)."""
+def load_analyzer_llm() -> QwenHF | QwenGGUF:
+    """Load analyzer LLM (supports HF and GGUF)."""
+    if config.USE_GGUF:
+        print(f"Loading local GGUF analyzer via llama.cpp: {config.LLM_GGUF_PATH}")
+        return QwenGGUF(
+            model_path=get_gguf_absolute_path(config.LLM_GGUF_PATH),
+            n_ctx=config.LLM_N_CTX,
+            n_gpu_layers=config.LLM_N_GPU_LAYERS,
+        )
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
     return _load_model_from_name(
@@ -183,12 +269,12 @@ def load_analyzer_llm() -> QwenHF:
 
 async def generate_streaming(
     messages: list[dict],
-    llm: QwenHF,
+    llm: QwenHF | QwenGGUF,
     stop_event: threading.Event,
     max_new_tokens: int = config.DEFAULT_MAX_TOKENS,
     temperature: float = config.DEFAULT_TEMPERATURE,
 ) -> AsyncIterator[str]:
-    """Yield generated text chunks. Chạy QwenHF._stream() trong executor."""
+    """Yield generated text chunks. Chạy Qwen LLM stream trong executor."""
     loop = asyncio.get_running_loop()
 
     def _start_stream():

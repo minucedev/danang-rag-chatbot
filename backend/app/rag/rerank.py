@@ -140,8 +140,11 @@ async def rerank_results(
             raw = await loop.run_in_executor(
                 None, lambda: reranker.predict(pairs, show_progress_bar=False)
             )
-            # CrossEncoder trả về scalar float khi chỉ có 1 pair
-            base_scores: list[float] = raw.tolist() if np.ndim(raw) > 0 else [float(raw)]
+            import math
+            # CrossEncoder trả về scalar float khi chỉ có 1 pair (raw logits)
+            logits = raw.tolist() if np.ndim(raw) > 0 else [float(raw)]
+            # Chuyển đổi logits thành probability [0, 1] bằng hàm sigmoid
+            base_scores = [1.0 / (1.0 + math.exp(-float(x))) for x in logits]
         except Exception as exc:
             print(f"[reranker] predict failed ({type(exc).__name__}: {exc}), returning unranked")
             return results[:top_k]
@@ -155,11 +158,14 @@ async def rerank_results(
         result.score = _heuristic_adjust(result, float(base), query_lower, f)
 
     ranked = sorted(results, key=lambda r: r.score, reverse=True)
-    filtered = [r for r in ranked if r.score >= score_threshold]
 
-    if not filtered:
-        # SPECIFIC_SEARCH: không trả junk — exact_name_search sẽ fallback
-        if intent == QueryIntent.SPECIFIC_SEARCH:
+    # Giữ nguyên cơ chế của Notebook: KHÔNG lọc bằng score_threshold để tránh làm miss dữ liệu,
+    # luôn trả về top_k kết quả tốt nhất.
+    # Tuy nhiên, riêng SPECIFIC_SEARCH (tìm đích danh) thì vẫn nên chặn rác nếu điểm quá thấp.
+    if intent == QueryIntent.SPECIFIC_SEARCH:
+        filtered = [r for r in ranked if r.score >= score_threshold]
+        if not filtered:
             return []
-        return ranked[:top_k]
-    return filtered[:top_k]
+        return filtered[:top_k]
+
+    return ranked[:top_k]

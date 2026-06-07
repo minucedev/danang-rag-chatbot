@@ -113,12 +113,16 @@ class CollectionRegistry:
         if intent == QueryIntent.CHITCHAT:
             return []
         # SPECIFIC_SEARCH: entity type unknown, rewritten_query is the name —
-        # search the 3 primary collections (reviews/rooms add noise for "about X")
+        # search the 3 primary entity collections AND all 3 review collections,
+        # so that "nhận xét về Năm Đảnh" returns actual customer reviews.
         # GENERAL
         return [
             config.COLLECTION_ACCOMMODATION_HOTELS,
             config.COLLECTION_RESTAURANTS,
             config.COLLECTION_PLACES,
+            config.COLLECTION_RESTAURANT_REVIEWS,
+            config.COLLECTION_ACCOMMODATION_REVIEWS,
+            config.COLLECTION_PLACE_REVIEWS,
         ]
 
     @classmethod
