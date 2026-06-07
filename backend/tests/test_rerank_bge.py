@@ -1,9 +1,15 @@
 """Test BGE cross-encoder reranker — rerank.py."""
 from __future__ import annotations
+import math
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+
+
+def _sigmoid(x: float) -> float:
+    """Logit → probability, khớp với cách rerank.py chuẩn hoá điểm cross-encoder."""
+    return 1.0 / (1.0 + math.exp(-x))
 
 from app.rag.intent import QueryIntent
 from app.rag.rerank import rerank_results
@@ -52,9 +58,14 @@ async def test_top_k_limits_output():
 
 
 async def test_threshold_filters_low_scores():
+    # Threshold chỉ áp dụng cho SPECIFIC_SEARCH. Logits → sigmoid:
+    # sigmoid(0.8)≈0.690 (qua), sigmoid(0.1)≈0.525 (dưới 0.6 → bị lọc).
     results = [_make_result("Good"), _make_result("Bad")]
     reranker = _mock_reranker([0.8, 0.1])
-    out = await rerank_results(results, "query", reranker, top_k=5, score_threshold=0.5)
+    out = await rerank_results(
+        results, "query", reranker, top_k=5, score_threshold=0.6,
+        intent=QueryIntent.SPECIFIC_SEARCH,
+    )
     assert len(out) == 1
     assert out[0].entity_name == "Good"
 
@@ -74,20 +85,21 @@ async def test_below_threshold_no_fallback_for_specific_search():
     """SPECIFIC_SEARCH: không trả junk khi below threshold — exact_name_search sẽ xử lý."""
     results = [_make_result("Unrelated")]
     reranker = _mock_reranker([0.1])
+    # sigmoid(0.1)≈0.525 < 0.6 → dưới ngưỡng → trả []
     out = await rerank_results(
-        results, "Novotel Đà Nẵng", reranker, top_k=5, score_threshold=0.5,
+        results, "Novotel Đà Nẵng", reranker, top_k=5, score_threshold=0.6,
         intent=QueryIntent.SPECIFIC_SEARCH,
     )
     assert out == []
 
 
 async def test_scalar_return_single_pair_no_crash():
-    """CrossEncoder trả scalar float khi 1 pair — không crash."""
+    """CrossEncoder trả scalar float khi 1 pair — không crash; logit → sigmoid."""
     results = [_make_result("Single")]
     reranker = _mock_reranker_scalar(0.7)
     out = await rerank_results(results, "query", reranker, top_k=5, score_threshold=0.0)
     assert len(out) == 1
-    assert abs(out[0].score - 0.7) < 0.001
+    assert abs(out[0].score - _sigmoid(0.7)) < 1e-6
 
 
 async def test_reranker_predict_failure_returns_unranked():
@@ -172,7 +184,7 @@ async def test_heuristic_noop_when_no_filters_and_no_rating():
 
 
 async def test_heuristic_stacks_on_cross_encoder_score():
-    """Có reranker: heuristic CỘNG lên điểm cross-encoder, không ghi đè."""
+    """Có reranker: heuristic CỘNG lên điểm cross-encoder (đã sigmoid), không ghi đè."""
     seafood = _r("Hải sản X", collection="restaurants_danang", cuisine="hải sản")
     reranker = _mock_reranker([0.5])
     extracted = {"filters": {"cuisine": ["hải sản"]}}
@@ -180,7 +192,7 @@ async def test_heuristic_stacks_on_cross_encoder_score():
         [seafood], "quán hải sản", reranker,
         top_k=5, score_threshold=-10.0, extracted=extracted,
     )
-    assert abs(out[0].score - 0.75) < 1e-6  # 0.5 (predict) + 0.25 (cuisine)
+    assert abs(out[0].score - (_sigmoid(0.5) + 0.25)) < 1e-6  # sigmoid(0.5) + 0.25 (cuisine)
 
 
 async def test_review_without_cuisine_not_penalized():
