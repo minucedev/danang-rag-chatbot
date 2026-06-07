@@ -25,24 +25,31 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.crawl_admin import db as crawl_db
+from app.db import sessions as session_db
 from app.api import crawl_admin as crawl_admin_api
 from app.api import metrics_admin
 from app.api import admin_shell
+from app.api import admin_auth
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Chỉ init crawl.db (sqlite). KHÔNG nạp model, KHÔNG Qdrant client.
+    # Init crawl.db + chats.db (users/auth) để cookie-gate admin xác thực được.
+    # KHÔNG nạp model, KHÔNG Qdrant client.
     await crawl_db.init_db()
-    print("Admin-only ready — http://localhost:8000/admin/crawl/  |  /admin/metrics/")
+    await session_db.init_db()
+    print("Admin-only ready — http://localhost:8000/admin/login")
     yield
+    await session_db.close_db()
     await crawl_db.close_db()
 
 
 app = FastAPI(title="PPBL Admin (chỉ dashboard)", lifespan=lifespan)
+app.include_router(admin_auth.router)
 app.include_router(admin_shell.router)
 app.include_router(crawl_admin_api.router)
 app.include_router(metrics_admin.router)
+app.middleware("http")(admin_auth.admin_guard)
 
 _BASE = Path(__file__).resolve().parent
 app.mount(

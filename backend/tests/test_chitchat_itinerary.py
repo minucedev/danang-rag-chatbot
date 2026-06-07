@@ -22,6 +22,11 @@ def _make_stub(monkeypatch, intent: QueryIntent, retrieve_results=None):
     pipeline.llm = MagicMock()
     pipeline.client = MagicMock()
     pipeline.reranker = None
+    pipeline.conversation_manager = MagicMock()
+    pipeline.conversation_manager.resolve_context = lambda q, h: {
+        "standalone_query": q,
+        "is_topic_shift": False
+    }
 
     analyzer = MagicMock()
     analyzer.analyze = lambda q: {
@@ -73,6 +78,11 @@ async def test_chitchat_skips_qdrant_retrieve(monkeypatch):
     pipeline.llm = MagicMock()
     pipeline.client = MagicMock()
     pipeline.reranker = None
+    pipeline.conversation_manager = MagicMock()
+    pipeline.conversation_manager.resolve_context = lambda q, h: {
+        "standalone_query": q,
+        "is_topic_shift": False
+    }
 
     analyzer = MagicMock()
     analyzer.analyze = lambda q: {

@@ -102,6 +102,11 @@ async def test_specific_search_no_exact_emits_alternatives(monkeypatch):
     monkeypatch.setattr(config, "GEMINI_API_KEY", None)
 
     pipeline = pl.RAGPipeline.__new__(pl.RAGPipeline)
+    pipeline.conversation_manager = MagicMock()
+    pipeline.conversation_manager.resolve_context = lambda q, h: {
+        "standalone_query": q,
+        "is_topic_shift": False
+    }
     pipeline.encoder = MagicMock()
     pipeline.llm = MagicMock()
     pipeline.client = MagicMock()
@@ -158,6 +163,11 @@ async def test_specific_search_exact_match_narrows_and_synthesizes(monkeypatch):
     monkeypatch.setattr(config, "GEMINI_API_KEY", None)
 
     pipeline = pl.RAGPipeline.__new__(pl.RAGPipeline)
+    pipeline.conversation_manager = MagicMock()
+    pipeline.conversation_manager.resolve_context = lambda q, h: {
+        "standalone_query": q,
+        "is_topic_shift": False
+    }
     pipeline.encoder = MagicMock()
     pipeline.llm = MagicMock()
     pipeline.client = MagicMock()

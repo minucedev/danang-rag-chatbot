@@ -9,7 +9,7 @@ from app.db import sessions as session_db
 
 
 async def get_current_user(authorization: Optional[str] = Header(default=None)) -> dict:
-    """Trả {id, username} nếu token hợp lệ; ngược lại 401. Gắn vào route cần đăng nhập."""
+    """Trả {id, username, role} nếu token hợp lệ; ngược lại 401. Gắn vào route cần đăng nhập."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Thiếu token đăng nhập")
     user = await auth_db.get_user_by_token(authorization[len("Bearer "):])

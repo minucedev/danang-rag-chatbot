@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
     username      TEXT    NOT NULL UNIQUE,
     password_hash TEXT    NOT NULL,             -- pbkdf2_hmac sha256, hex
     password_salt TEXT    NOT NULL,             -- 16 byte, hex
+    role          TEXT    NOT NULL DEFAULT 'user',  -- 'user' | 'admin'
     created_at    INTEGER NOT NULL
 );
 
@@ -21,7 +22,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     title       TEXT    NOT NULL,
     user_id     TEXT,                           -- chủ sở hữu (NULL = chat ẩn danh cũ, vô chủ)
     created_at  INTEGER NOT NULL,
-    updated_at  INTEGER NOT NULL
+    updated_at  INTEGER NOT NULL,
+    summary     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, updated_at);
 

@@ -22,11 +22,21 @@ async def init_db() -> None:
     schema = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
     await _db.executescript(schema)
     # Migration idempotent cho DB cũ: schema.sql dùng CREATE TABLE IF NOT EXISTS nên KHÔNG
-    # thêm cột vào bảng sessions đã tồn tại → ALTER thủ công, bỏ qua nếu cột đã có.
-    try:
-        await _db.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
-    except aiosqlite.OperationalError:
-        pass  # cột user_id đã tồn tại
+    # thêm cột mới vào bảng đã tồn tại (sessions, users) → ALTER thủ công từng (bảng, cột),
+    # bỏ qua nếu cột đã có.
+    for _table, _col, _decl in (
+        ("sessions", "user_id", "TEXT"),
+        ("sessions", "summary", "TEXT"),
+        ("users", "role", "TEXT NOT NULL DEFAULT 'user'"),
+    ):
+        try:
+            await _db.execute(f"ALTER TABLE {_table} ADD COLUMN {_col} {_decl}")
+        except aiosqlite.OperationalError as exc:
+            # CHỈ nuốt trường hợp idempotent "cột đã tồn tại". Các lỗi khác cùng kiểu
+            # OperationalError (no such table / database is locked / corrupt) là sự cố thật
+            # → re-raise thay vì giấu để app khởi động "sạch" trên DB hỏng.
+            if "duplicate column name" not in str(exc).lower():
+                raise
     await _db.commit()
 
 
@@ -52,7 +62,7 @@ async def create_session(title: str, user_id: Optional[str] = None) -> str:
     sid = str(uuid.uuid4())
     now = int(time.time())
     await _db_conn().execute(
-        "INSERT INTO sessions (id, title, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO sessions (id, title, user_id, created_at, updated_at, summary) VALUES (?, ?, ?, ?, ?, NULL)",
         (sid, title, user_id, now, now),
     )
     await _db_conn().commit()
@@ -61,7 +71,7 @@ async def create_session(title: str, user_id: Optional[str] = None) -> str:
 
 async def list_sessions(user_id: str, limit: int = 50, offset: int = 0) -> List[SessionEntity]:
     async with _db_conn().execute(
-        "SELECT id, title, created_at, updated_at FROM sessions "
+        "SELECT id, title, created_at, updated_at, summary FROM sessions "
         "WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
         (user_id, limit, offset),
     ) as cur:
@@ -71,11 +81,18 @@ async def list_sessions(user_id: str, limit: int = 50, offset: int = 0) -> List[
 
 async def get_session(session_id: str) -> Optional[SessionEntity]:
     async with _db_conn().execute(
-        "SELECT id, title, created_at, updated_at FROM sessions WHERE id = ?",
+        "SELECT id, title, created_at, updated_at, summary FROM sessions WHERE id = ?",
         (session_id,),
     ) as cur:
         row = await cur.fetchone()
     return SessionEntity(**dict(row)) if row else None
+
+async def update_session_summary(session_id: str, summary: str) -> None:
+    await _db_conn().execute(
+        "UPDATE sessions SET summary = ?, updated_at = ? WHERE id = ?",
+        (summary, int(time.time()), session_id),
+    )
+    await _db_conn().commit()
 
 
 async def session_owned_by(session_id: str, user_id: str) -> bool:

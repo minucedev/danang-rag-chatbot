@@ -1,6 +1,10 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@/app/auth-provider";
+
+// Dashboard quản trị do backend phục vụ (cùng host với API), mở tab mới — chỉ hiện với role admin.
+const ADMIN_URL = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/admin`;
 
 const NAV = [
   { href: "/chat", label: "Chat", match: (p: string) => p.startsWith("/chat") },
@@ -10,6 +14,7 @@ const NAV = [
 
 export function TopAppBar() {
   const pathname = usePathname() ?? "";
+  const { user } = useAuth();
 
   return (
     <header className="h-16 shrink-0 bg-surface/80 backdrop-blur-md shadow-sm border-b border-outline-variant/10 z-50">
@@ -49,6 +54,16 @@ export function TopAppBar() {
 
         {/* Right actions — desktop only */}
         <div className="hidden md:flex items-center gap-2">
+          {user?.role === "admin" && (
+            <a
+              href={ADMIN_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-on-surface-variant text-sm hover:text-primary transition-colors mr-1"
+            >
+              Admin
+            </a>
+          )}
           <Link
             href="/profile"
             aria-label="Hồ sơ"

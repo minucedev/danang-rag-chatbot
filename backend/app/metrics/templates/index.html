@@ -7,7 +7,7 @@
   <title>Metrics — Đà Nẵng RAG</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/admin/metrics/static/style.css">
+  <link rel="stylesheet" href="/admin/metrics/static/style.css?v=2">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 
@@ -91,10 +91,10 @@
       charts[id] = new Chart(document.getElementById(id), config);
     }
 
-    const AXIS = { ticks: { color: "#8b90a0" }, grid: { color: "#2e3340" } };
+    const AXIS = { ticks: { color: "#6b7280" }, grid: { color: "#e4e7ec" } };
     const baseOpts = (extra = {}) => ({
       responsive: true,
-      plugins: { legend: { labels: { color: "#e4e7ef" } } },
+      plugins: { legend: { labels: { color: "#1e2330" } } },
       scales: { x: AXIS, y: { ...AXIS, beginAtZero: true, ...extra } },
     });
 
@@ -144,7 +144,7 @@
         type: "bar",
         data: {
           labels: cats,
-          datasets: [{ label: "%", backgroundColor: "#00b894", data: cats.map(c => mean(byCat[c]) * 100) }],
+          datasets: [{ label: "%", backgroundColor: "#0f9d76", data: cats.map(c => mean(byCat[c]) * 100) }],
         },
         options: { ...baseOpts({ max: 100 }), indexAxis: "y" },
       });
@@ -155,9 +155,9 @@
         data: {
           labels: perf.map(p => p.id),
           datasets: [
-            { label: "Retrieval", backgroundColor: "#74b9ff", data: perf.map(p => p.latency_retrieval ?? 0) },
+            { label: "Retrieval", backgroundColor: "#2f6feb", data: perf.map(p => p.latency_retrieval ?? 0) },
             {
-              label: "Generation", backgroundColor: "#fdcb6e",
+              label: "Generation", backgroundColor: "#b9820b",
               data: perf.map(p => Math.max(0, (p.latency_total ?? 0) - (p.latency_retrieval ?? 0))),
             },
           ],
@@ -170,7 +170,7 @@
         type: "bar",
         data: {
           labels: itin.map(r => r.id),
-          datasets: [{ label: "score", backgroundColor: "#a29bfe", data: itin.map(r => r.itinerary_score) }],
+          datasets: [{ label: "score", backgroundColor: "#8b7bf0", data: itin.map(r => r.itinerary_score) }],
         },
         options: baseOpts({ max: 1 }),
       });

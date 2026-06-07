@@ -7,26 +7,43 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 
-export default function LoginPage() {
-  const { login } = useAuth();
+export default function RegisterPage() {
+  const { register } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (username.trim().length < 3) {
+      setError("Tài khoản tối thiểu 3 ký tự");
+      return;
+    }
+    if (password.length < 6) {
+      setError("Mật khẩu tối thiểu 6 ký tự");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Mật khẩu nhập lại không khớp");
+      return;
+    }
     setSubmitting(true);
     try {
-      await login(username.trim(), password);
-      // login() tự chuyển hướng /chat khi thành công.
+      await register(username.trim(), password);
+      // register() tự đăng nhập + chuyển hướng /chat khi thành công.
     } catch (err) {
-      setError(
-        err instanceof ApiError && err.status === 401
-          ? "Sai tài khoản hoặc mật khẩu"
-          : "Lỗi kết nối, vui lòng thử lại",
-      );
+      if (err instanceof ApiError) {
+        setError(
+          err.status === 409
+            ? "Tên đăng nhập đã tồn tại"
+            : "Máy chủ gặp lỗi, vui lòng thử lại sau",
+        );
+      } else {
+        setError("Không kết nối được máy chủ, kiểm tra mạng và thử lại");
+      }
       setSubmitting(false);
     }
   }
@@ -34,9 +51,9 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-full items-center justify-center p-6">
       <Card className="w-full max-w-sm p-8">
-        <h1 className="text-xl font-bold">Đăng nhập</h1>
+        <h1 className="text-xl font-bold">Đăng ký</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Trợ lý du lịch Đà Nẵng — đăng nhập để tiếp tục.
+          Tạo tài khoản để dùng trợ lý du lịch Đà Nẵng.
         </p>
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
           <div className="space-y-1">
@@ -61,19 +78,32 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
+              autoComplete="new-password"
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="confirm" className="text-sm font-medium">
+              Nhập lại mật khẩu
+            </label>
+            <Input
+              id="confirm"
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
               required
             />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" className="w-full" disabled={submitting}>
-            {submitting ? "Đang đăng nhập…" : "Đăng nhập"}
+            {submitting ? "Đang tạo tài khoản…" : "Đăng ký"}
           </Button>
         </form>
         <p className="mt-4 text-sm text-muted-foreground">
-          Chưa có tài khoản?{" "}
-          <Link href="/register" className="font-medium text-primary hover:underline">
-            Đăng ký
+          Đã có tài khoản?{" "}
+          <Link href="/login" className="font-medium text-primary hover:underline">
+            Đăng nhập
           </Link>
         </p>
       </Card>

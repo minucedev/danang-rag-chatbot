@@ -101,6 +101,7 @@ from app.api import auth as auth_api
 from app.api import admin_shell
 from app.api import crawl_admin as crawl_admin_api
 from app.api import metrics_admin
+from app.api import admin_auth
 
 
 @asynccontextmanager
@@ -109,30 +110,35 @@ async def lifespan(app: FastAPI):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     print("Loading embedding model...")
-    encoder = SentenceTransformer(config.EMBED_MODEL_NAME, device=device)
+    encoder = SentenceTransformer(config.EMBED_MODEL_NAME, device=device, local_files_only=True)
 
     reranker = None
     if config.ENABLE_RERANKER:
         print("Loading reranker model...")
         try:
-            reranker = CrossEncoder(config.RERANKER_MODEL_NAME, max_length=512, device=device)
+            reranker = CrossEncoder(config.RERANKER_MODEL_NAME, max_length=512, device=device, local_files_only=True)
         except Exception as exc:
-            print(f"[startup] WARNING: Reranker failed to load ({type(exc).__name__}: {exc}). "
-                  f"Continuing without reranking — result quality will be reduced.")
+            import traceback
+            print(f"[startup] WARNING: Reranker failed to load:\n{traceback.format_exc()}")
     else:
         print("Reranker disabled (ENABLE_RERANKER=false) — skipping to save memory.")
 
-    print(f"Loading LLM ({config.LLM_HF_MODEL_NAME})...")
+    if config.USE_GGUF:
+        print(f"Loading LLM (GGUF: {config.LLM_GGUF_PATH})...")
+    else:
+        print(f"Loading LLM ({config.LLM_HF_MODEL_NAME})...")
+
     try:
         llm = load_llm()
     except Exception as exc:
+        model_desc = config.LLM_GGUF_PATH if config.USE_GGUF else config.LLM_HF_MODEL_NAME
         raise RuntimeError(
-            f"[startup] FATAL: Failed to load main LLM '{config.LLM_HF_MODEL_NAME}': "
+            f"[startup] FATAL: Failed to load main LLM '{model_desc}': "
             f"{type(exc).__name__}: {exc}"
         ) from exc
 
     analyzer_llm = llm
-    if config.ANALYZER_HF_MODEL_NAME != config.LLM_HF_MODEL_NAME:
+    if not config.USE_GGUF and config.ANALYZER_HF_MODEL_NAME != config.LLM_HF_MODEL_NAME:
         print(f"Loading analyzer model ({config.ANALYZER_HF_MODEL_NAME})...")
         try:
             analyzer_llm = load_analyzer_llm()
@@ -230,9 +236,13 @@ app.include_router(admin.router)
 app.include_router(events.router)
 app.include_router(favorites.router)
 app.include_router(itineraries.router)
+app.include_router(admin_auth.router)
 app.include_router(admin_shell.router)
 app.include_router(crawl_admin_api.router)
 app.include_router(metrics_admin.router)
+
+# Gác cookie cho toàn bộ /admin* (trừ login/logout/static). Đăng ký sau router.
+app.middleware("http")(admin_auth.admin_guard)
 
 # Static cho dashboard crawl (style.css) — phục vụ tại /admin/crawl/static/*
 app.mount(

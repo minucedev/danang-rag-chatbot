@@ -7,24 +7,24 @@
 }
 
 :root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --surface2: #22262f;
-  --border: #2e3340;
-  --text: #e4e7ef;
-  --text2: #8b90a0;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface2: #f4f5f7;
+  --border: #e4e7ec;
+  --text: #1e2330;
+  --text2: #6b7280;
   --accent: #6c5ce7;
-  --accent2: #a29bfe;
-  --green: #00b894;
-  --green-bg: rgba(0, 184, 148, .12);
-  --red: #ff6b6b;
-  --red-bg: rgba(255, 107, 107, .12);
-  --amber: #fdcb6e;
-  --amber-bg: rgba(253, 203, 110, .12);
-  --blue: #74b9ff;
-  --blue-bg: rgba(116, 185, 255, .12);
+  --accent2: #5a4ad1;
+  --green: #0f9d76;
+  --green-bg: rgba(15, 157, 118, .12);
+  --red: #e0454e;
+  --red-bg: rgba(224, 69, 78, .12);
+  --amber: #b9820b;
+  --amber-bg: rgba(185, 130, 11, .14);
+  --blue: #2f6feb;
+  --blue-bg: rgba(47, 111, 235, .12);
   --radius: 12px;
-  --shadow: 0 2px 12px rgba(0, 0, 0, .35);
+  --shadow: 0 1px 3px rgba(16, 24, 40, .06), 0 1px 2px rgba(16, 24, 40, .04);
 }
 
 body {
@@ -278,7 +278,7 @@ header h1 span {
 
 /* ── Log ── */
 .log-box {
-  background: #0d0f14;
+  background: #f6f7f9;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
@@ -287,7 +287,7 @@ header h1 span {
   font-family: 'Cascadia Code', 'Fira Code', monospace;
   font-size: 12px;
   line-height: 1.7;
-  color: #7ec88b;
+  color: #334155;
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -344,11 +344,11 @@ th {
 
 td {
   padding: 7px 10px;
-  border-bottom: 1px solid rgba(46, 51, 64, .5);
+  border-bottom: 1px solid #eef0f3;
 }
 
 tr:hover td {
-  background: rgba(108, 92, 231, .04);
+  background: rgba(108, 92, 231, .07);
 }
 
 .empty-row {

@@ -122,15 +122,15 @@ async def retrieve_from_collection(
         results = []
         for point in points:
             score = point.score if hasattr(point, "score") else 0.0
-            if score < score_threshold:
-                continue
+            # Giữ nguyên cơ chế của Notebook: KHÔNG lọc bằng score_threshold ở bước vector search,
+            # để tránh miss dữ liệu khi similarity score tự nhiên thấp.
             payload = point.payload or {}
 
             # Lọc thủ công (Đã tối ưu hóa logic khoảng giá)
             skip = False
             if filters:
-                min_price = payload.get("min_price_vnd")
-                max_price = payload.get("max_price_vnd")
+                min_price = payload.get("min_price_vnd") or payload.get("price_min_vnd")
+                max_price = payload.get("max_price_vnd") or payload.get("price_max_vnd")
 
                 # CHẶN TRẦN GIÁ (max_price)
                 if filters.get("max_price"):
@@ -168,37 +168,66 @@ async def retrieve_from_collection(
                 except (TypeError, ValueError):
                     return None
 
-            r = SearchResultSchema(
-                point_id=str(point.id),
-                collection=collection_name,
-                score=score,
-                entity_name=payload.get("entity_name", ""),
-                place_name=payload.get("place_name", ""),
-                district=payload.get("district", ""),
-                rating=_float(payload.get("rating")),
-                min_price=_float(payload.get("min_price_vnd")),
-                max_price=_float(payload.get("max_price_vnd")),
-                address=payload.get("address", ""),
-                content=payload.get("content", ""),
-                parent_entity_name=payload.get("parent_entity_name"),
-                parent_entity_id=payload.get("parent_entity_id"),
-                room_name=payload.get("room_name"),
-                capacity=_int(payload.get("capacity")),
-                bed_type=payload.get("bed_type"),
-                area_m2=_float(payload.get("area_m2")),
-                room_view=payload.get("room_view"),
-                cuisine=payload.get("cuisine"),
-                restaurant_type=payload.get("restaurant_type"),
-                check_in_time=payload.get("check_in_time"),
-                check_out_time=payload.get("check_out_time"),
-                time_open=payload.get("time_open"),
-                time_close=payload.get("time_close"),
-                tags=_norm_tags(payload.get("tags")),
-                review_count=_int(payload.get("review_count")),
-                star_rating=_float(payload.get("star_rating")),
-                price_level=payload.get("price_level"),
-                price_currency=payload.get("price_currency"),
-            )
+            def _bool(v):
+                if v is None:
+                    return None
+                if isinstance(v, bool):
+                    return v
+                s = str(v).strip().lower()
+                return s in ("true", "1", "yes", "có", "co")
+
+            init_kwargs = {
+                "point_id": str(point.id),
+                "collection": collection_name,
+                "score": score,
+                "entity_name": payload.get("entity_name", ""),
+                "place_name": payload.get("place_name", ""),
+                "district": payload.get("district", ""),
+                "rating": _float(payload.get("rating")),
+                "min_price": _float(payload.get("min_price_vnd") or payload.get("price_min_vnd")),
+                "max_price": _float(payload.get("max_price_vnd") or payload.get("price_max_vnd")),
+                "address": payload.get("address", ""),
+                "content": payload.get("content", ""),
+                "parent_entity_name": payload.get("parent_entity_name"),
+                "parent_entity_id": payload.get("parent_entity_id"),
+                "room_name": payload.get("room_name"),
+                "capacity": _int(payload.get("capacity")),
+                "bed_type": payload.get("bed_type"),
+                "area_m2": _float(payload.get("area_m2")),
+                "room_view": payload.get("room_view"),
+                "cuisine": payload.get("cuisine"),
+                "restaurant_type": payload.get("restaurant_type"),
+                "check_in_time": payload.get("check_in_time"),
+                "check_out_time": payload.get("check_out_time"),
+                "cancellation_policy": payload.get("cancellation_policy"),
+                "children_policy": payload.get("children_policy"),
+                "time_open": payload.get("time_open"),
+                "time_close": payload.get("time_close"),
+                "tags": _norm_tags(payload.get("tags")),
+                "review_count": _int(payload.get("review_count") or payload.get("google_review_count")),
+                "star_rating": _float(payload.get("star_rating")),
+                "price_level": payload.get("price_level"),
+                "price_currency": payload.get("price_currency"),
+            }
+            # Dynamically copy any extra payload keys that are not already set
+            _float_fields = {"price_avg_vnd", "price_score", "quality_score", "service_score", "space_score", "location_score", "recency_score"}
+            _list_fields = {"suitable_for", "best_time_to_visit", "visit_duration", "amenities_room"}
+            _int_fields = {"tiktok_total_likes", "tiktok_comment_count", "tiktok_video_count", "total_mentions", "room_count", "image_count"}
+            _bool_fields = {"has_discount"}
+            for k, v in payload.items():
+                if k not in ["min_price_vnd", "max_price_vnd", "entity_name", "place_name", "address", "content", "tags"]:
+                    if k not in init_kwargs:
+                        if k in _list_fields:
+                            init_kwargs[k] = _norm_tags(v)
+                        elif k in _float_fields:
+                            init_kwargs[k] = _float(v)
+                        elif k in _int_fields:
+                            init_kwargs[k] = _int(v)
+                        elif k in _bool_fields:
+                            init_kwargs[k] = _bool(v)
+                        else:
+                            init_kwargs[k] = v
+            r = SearchResultSchema(**init_kwargs)
 
             # Enrich reviews with parent entity data
             review_collections = {
@@ -226,7 +255,12 @@ async def retrieve_from_collection(
 
 
 def _fuzzy_name_score(query_slug: str, candidate: str) -> float:
-    return SequenceMatcher(None, query_slug, slugify_vn(candidate)).ratio()
+    cand_slug = slugify_vn(candidate)
+    if not cand_slug:
+        return 0.0
+    if len(cand_slug) >= 4 and cand_slug in query_slug:
+        return 1.0
+    return SequenceMatcher(None, query_slug, cand_slug).ratio()
 
 
 async def exact_name_search(
@@ -319,21 +353,48 @@ async def exact_name_search(
             except (TypeError, ValueError):
                 return None
 
-        results.append(SearchResultSchema(
-            point_id=str(point.id),
-            collection=col,
-            score=0.5,
-            entity_name=payload.get("entity_name", ""),
-            place_name=payload.get("place_name", ""),
-            district=payload.get("district", ""),
-            rating=_float(payload.get("rating")),
-            min_price=_float(payload.get("min_price_vnd")),
-            max_price=_float(payload.get("max_price_vnd")),
-            address=payload.get("address", ""),
-            content=payload.get("content", ""),
-            review_count=_int(payload.get("review_count")),
-            star_rating=_float(payload.get("star_rating")),
-        ))
+        def _bool(v):
+            if v is None:
+                return None
+            if isinstance(v, bool):
+                return v
+            s = str(v).strip().lower()
+            return s in ("true", "1", "yes", "có", "co")
+
+        init_kwargs = {
+            "point_id": str(point.id),
+            "collection": col,
+            "score": 0.5,
+            "entity_name": payload.get("entity_name", ""),
+            "place_name": payload.get("place_name", ""),
+            "district": payload.get("district", ""),
+            "rating": _float(payload.get("rating")),
+            "min_price": _float(payload.get("min_price_vnd")),
+            "max_price": _float(payload.get("max_price_vnd")),
+            "address": payload.get("address", ""),
+            "content": payload.get("content", ""),
+            "review_count": _int(payload.get("review_count") or payload.get("google_review_count")),
+            "star_rating": _float(payload.get("star_rating")),
+        }
+        # Dynamically copy any extra payload keys that are not already set
+        _float_fields = {"price_avg_vnd", "price_score", "quality_score", "service_score", "space_score", "location_score", "recency_score"}
+        _list_fields = {"suitable_for", "best_time_to_visit", "visit_duration", "amenities_room"}
+        _int_fields = {"tiktok_total_likes", "tiktok_comment_count", "tiktok_video_count", "total_mentions", "room_count", "image_count"}
+        _bool_fields = {"has_discount"}
+        for k, v in payload.items():
+            if k not in ["min_price_vnd", "max_price_vnd", "entity_name", "place_name", "address", "content", "tags"]:
+                if k not in init_kwargs:
+                    if k in _list_fields:
+                        init_kwargs[k] = _norm_tags(v)
+                    elif k in _float_fields:
+                        init_kwargs[k] = _float(v)
+                    elif k in _int_fields:
+                        init_kwargs[k] = _int(v)
+                    elif k in _bool_fields:
+                        init_kwargs[k] = _bool(v)
+                    else:
+                        init_kwargs[k] = v
+        results.append(SearchResultSchema(**init_kwargs))
 
     return results
 
@@ -388,6 +449,9 @@ async def retrieve_by_intent(
                 seen.add(key)
                 all_results.append(r)
 
+    # Sort all combined results by vector score descending
+    all_results.sort(key=lambda x: x.score, reverse=True)
+
     # Fallback price filter: Qdrant Range silently skips records lacking the field.
     # Asymmetry is intentional: an unknown price passes max_price (don't hide a
     # possibly-cheap-enough result) but fails min_price (can't confirm the floor).
@@ -402,3 +466,72 @@ async def retrieve_by_intent(
         all_results = [r for r in all_results if r.min_price is not None and r.min_price >= min_p]
 
     return all_results[:max_total]
+
+
+# Map từ entity collection → review collection tương ứng
+_ENTITY_TO_REVIEW_COLLECTION: dict[str, str] = {
+    config.COLLECTION_RESTAURANTS: config.COLLECTION_RESTAURANT_REVIEWS,
+    config.COLLECTION_ACCOMMODATION_HOTELS: config.COLLECTION_ACCOMMODATION_REVIEWS,
+    config.COLLECTION_PLACES: config.COLLECTION_PLACE_REVIEWS,
+}
+
+
+async def fetch_reviews_for_entity(
+    entity: SearchResultSchema,
+    client: AsyncQdrantClient,
+    limit: int = 8,
+) -> list[SearchResultSchema]:
+    """Fetch reviews trực tiếp bằng parent_entity_id (scroll, không phải vector search).
+
+    Dùng cho SPECIFIC_SEARCH sau khi đã xác định được entity đúng, để bổ sung
+    nội dung review thực tế từ khách hàng vào context — thay vì dựa vào vector
+    similarity (review text thường không chứa tên thực thể nên similarity thấp).
+    """
+    entity_id = entity.point_id
+    entity_collection = entity.collection
+    entity_name = entity.get_display_name()
+
+    review_col = _ENTITY_TO_REVIEW_COLLECTION.get(entity_collection)
+    if not review_col or not entity_id:
+        return []
+
+    try:
+        result, _ = await client.scroll(
+            collection_name=review_col,
+            scroll_filter=Filter(
+                must=[FieldCondition(key="parent_entity_id", match=MatchValue(value=entity_id))]
+            ),
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+    except Exception as exc:
+        print(f"[retrieval] fetch_reviews_for_entity({entity_id}): {type(exc).__name__}: {exc}")
+        return []
+
+    reviews: list[SearchResultSchema] = []
+    for point in result:
+        payload = point.payload or {}
+        content = payload.get("content", "")
+        if not content:
+            continue  # Bỏ qua review không có nội dung
+        r = SearchResultSchema(
+            point_id=str(point.id),
+            collection=review_col,
+            score=0.9,  # score cao vì đây là exact match theo ID
+            entity_name="",
+            place_name="",
+            district=entity.district or "",
+            rating=float(payload.get("rating")) if payload.get("rating") is not None else None,
+            content=content,
+            parent_entity_id=entity_id,
+            parent_entity_name=entity_name,
+        )
+        # Copy thêm các trường review
+        for field in ("sentiment", "aspects", "recency_score", "timestamp_norm"):
+            val = payload.get(field)
+            if val is not None:
+                setattr(r, field, val)
+        reviews.append(r)
+    return reviews
+

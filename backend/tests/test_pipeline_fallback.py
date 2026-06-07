@@ -34,6 +34,11 @@ def _build_pipeline_stub(monkeypatch, *, results, gemini, local, use_gemini_prim
     pipeline.encoder = MagicMock()
     pipeline.llm = MagicMock()
     pipeline.client = MagicMock()
+    pipeline.conversation_manager = MagicMock()
+    pipeline.conversation_manager.resolve_context = lambda q, h: {
+        "standalone_query": q,
+        "is_topic_shift": False
+    }
 
     analyzer = MagicMock()
     analyzer.analyze = lambda q: {

@@ -11,24 +11,45 @@ class ChatFilters(BaseModel):
     min_rating: Optional[float] = None
     max_price: Optional[float] = None
     min_price: Optional[float] = None
-    # Bộ lọc giàu (ported từ notebook): scalar dùng cho Qdrant filter, list dùng cho rerank.
-    # star_rating/price_level vào thẳng MatchValue/Range của Qdrant → ràng buộc miền giá trị
-    # tại biên FE để giá trị sai không âm thầm trả về 0 kết quả.
     star_rating: Optional[int] = Field(None, ge=1, le=5)
     price_level: Optional[Literal["low", "mid", "high"]] = None
+    
+    # Extended restaurant / place filters
+    cuisine: Optional[List[str]] = Field(default_factory=list)
+    restaurant_type: Optional[List[str]] = Field(default_factory=list)
+    restaurant_category: Optional[List[str]] = Field(default_factory=list)
+    price_avg_vnd: Optional[int] = None
+    price_score: Optional[float] = None
+    quality_score: Optional[float] = None
+    service_score: Optional[float] = None
+    space_score: Optional[float] = None
+    location_score: Optional[float] = None
+    
+    # Extended place filters
+    suitable_for: Optional[List[str]] = Field(default_factory=list)
+    best_time_to_visit: Optional[List[str]] = Field(default_factory=list)
+    visit_duration: Optional[List[str]] = Field(default_factory=list)
+    tags: Optional[List[str]] = Field(default_factory=list)
+    weather_dependent: Optional[str] = None
+    
+    # Extended hotel / room filters
+    check_in_time: Optional[str] = None
+    check_out_time: Optional[str] = None
+    cancellation_policy: Optional[List[str]] = Field(default_factory=list)
+    children_policy: Optional[List[str]] = Field(default_factory=list)
     has_discount: Optional[bool] = None
-    cuisine: Optional[List[str]] = None
-    restaurant_type: Optional[List[str]] = None
-    restaurant_category: Optional[List[str]] = None
-    suitable_for: Optional[List[str]] = None
-    best_time_to_visit: Optional[List[str]] = None
-    visit_duration: Optional[List[str]] = None
-    tags: Optional[List[str]] = None
-    room_view: Optional[List[str]] = None
-    bed_type: Optional[List[str]] = None
-    amenities_room: Optional[List[str]] = None
-    cancellation_policy: Optional[List[str]] = None
-    children_policy: Optional[List[str]] = None
+    room_count: Optional[int] = None
+    max_capacity: Optional[int] = None
+    image_count: Optional[int] = None
+    room_capacity: Optional[int] = None
+    bed_type: Optional[List[str]] = Field(default_factory=list)
+    area_m2: Optional[float] = None
+    room_view: Optional[List[str]] = Field(default_factory=list)
+    amenities_room: Optional[List[str]] = Field(default_factory=list)
+    
+    # Review / sentiment filters
+    sentiment_preference: Optional[str] = None
+    recency_min: Optional[float] = None
 
 
 class ChatRequest(BaseModel):
@@ -40,6 +61,8 @@ class ChatRequest(BaseModel):
 
 
 class SearchResultSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     point_id: str
     collection: str
     score: float
@@ -64,6 +87,8 @@ class SearchResultSchema(BaseModel):
     restaurant_type: Optional[str] = None
     check_in_time: Optional[str] = None
     check_out_time: Optional[str] = None
+    cancellation_policy: Optional[str] = None
+    children_policy: Optional[str] = None
     time_open: Optional[str] = None
     time_close: Optional[str] = None
     tags: Optional[List[str]] = None
@@ -71,6 +96,35 @@ class SearchResultSchema(BaseModel):
     star_rating: Optional[float] = None
     price_level: Optional[str] = None
     price_currency: Optional[str] = None
+
+    # Dynamic fields from ETL
+    price_avg_vnd: Optional[float] = None
+    price_score: Optional[float] = None
+    quality_score: Optional[float] = None
+    service_score: Optional[float] = None
+    space_score: Optional[float] = None
+    location_score: Optional[float] = None
+    weather_dependent: Optional[str] = None
+    opening_hours: Optional[str] = None
+    phone: Optional[str] = None
+    category: Optional[str] = None
+    link: Optional[str] = None
+    suitable_for: Optional[List[str]] = None
+    best_time_to_visit: Optional[List[str]] = None
+    visit_duration: Optional[List[str]] = None
+    amenities_room: Optional[List[str]] = None
+    price_range_raw: Optional[str] = None
+    tiktok_total_likes: Optional[int] = None
+    tiktok_comment_count: Optional[int] = None
+    tiktok_video_count: Optional[int] = None
+    total_mentions: Optional[int] = None
+    has_discount: Optional[bool] = None
+    room_count: Optional[int] = None
+    image_count: Optional[int] = None
+    sentiment: Optional[str] = None
+    aspects: Optional[str] = None
+    recency_score: Optional[float] = None
+    timestamp_norm: Optional[str] = None
 
     _REVIEW_COLLECTIONS = {
         config.COLLECTION_ACCOMMODATION_REVIEWS,
@@ -90,11 +144,27 @@ class SearchResultSchema(BaseModel):
         return "Unknown"
 
     def get_price_display(self) -> str:
-        if self.min_price is None:
-            return "Không có thông tin giá"
-        if self.max_price and self.max_price > self.min_price:
-            return f"{self.min_price:,.0f} - {self.max_price:,.0f} VND"
-        return f"{self.min_price:,.0f} VND"
+        parts = []
+        if self.min_price is not None:
+            if self.min_price == 0 and (not self.max_price or self.max_price == 0):
+                parts.append("Miễn phí")
+            elif self.max_price and self.max_price > self.min_price:
+                parts.append(f"{self.min_price:,.0f} - {self.max_price:,.0f} VND")
+            else:
+                parts.append(f"{self.min_price:,.0f} VND")
+                
+        if getattr(self, 'price_avg_vnd', None) is not None:
+            parts.append(f"Trung bình {self.price_avg_vnd:,.0f} VND")
+        
+        if getattr(self, 'price_range_raw', None):
+            parts.append(f"{self.price_range_raw}")
+            
+        if getattr(self, 'price_level', None) and self.price_level != 'unknown' and not parts:
+            parts.append(f"Mức giá: {self.price_level}")
+            
+        if parts:
+            return " | ".join(parts)
+        return "Không có thông tin giá"
 
     def get_rating_display(self) -> str:
         rating_value = self.parent_rating if self.parent_rating else self.rating
@@ -131,6 +201,7 @@ class SessionEntity(BaseModel):
     title: str
     created_at: int
     updated_at: int
+    summary: Optional[str] = None
 
 
 # ─── Recommend / user profile (ported from PBL_ lấy dữ liệu) ───────────────
