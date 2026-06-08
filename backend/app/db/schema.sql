@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     updated_at  INTEGER NOT NULL,
     summary     TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, updated_at);
+-- idx_sessions_user (trên user_id) được tạo trong init_db() SAU bước ALTER migration,
+-- vì trên DB cũ cột user_id chưa tồn tại lúc executescript chạy file này.
 
 CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

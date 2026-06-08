@@ -37,6 +37,9 @@ async def init_db() -> None:
             # → re-raise thay vì giấu để app khởi động "sạch" trên DB hỏng.
             if "duplicate column name" not in str(exc).lower():
                 raise
+    # Index trên sessions.user_id tạo SAU migration (lúc này cột chắc chắn tồn tại). KHÔNG để
+    # trong schema.sql vì executescript chạy trước ALTER → trên DB cũ sẽ lỗi "no such column".
+    await _db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, updated_at)")
     await _db.commit()
 
 
