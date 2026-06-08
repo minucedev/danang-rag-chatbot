@@ -40,19 +40,21 @@ _SHELL_HTML = """<!DOCTYPE html>
     <span class="brand">🛠️ Admin — Đà Nẵng RAG</span>
     <button id="t-crawl" class="active" onclick="show('crawl')">🕷️ Crawl</button>
     <button id="t-metrics" onclick="show('metrics')">📊 Metrics</button>
+    <button id="t-qdrant" onclick="show('qdrant')">🗄️ Qdrant</button>
   </div>
 
   <iframe id="f-crawl" src="/admin/crawl/" title="Crawl Admin"></iframe>
   <iframe id="f-metrics" class="hidden" title="Metrics Admin"></iframe>
+  <iframe id="f-qdrant" class="hidden" title="Qdrant Admin"></iframe>
 
   <script>
-    const frames = { crawl: document.getElementById("f-crawl"), metrics: document.getElementById("f-metrics") };
-    const tabs = { crawl: document.getElementById("t-crawl"), metrics: document.getElementById("t-metrics") };
-    // Lazy-load: chỉ gán src cho iframe metrics lần đầu mở (tránh SSE/log metrics kết nối sớm).
-    const SRC = { crawl: "/admin/crawl/", metrics: "/admin/metrics/" };
+    const frames = { crawl: document.getElementById("f-crawl"), metrics: document.getElementById("f-metrics"), qdrant: document.getElementById("f-qdrant") };
+    const tabs = { crawl: document.getElementById("t-crawl"), metrics: document.getElementById("t-metrics"), qdrant: document.getElementById("t-qdrant") };
+    // Lazy-load: chỉ gán src cho iframe lần đầu mở (tránh kết nối sớm).
+    const SRC = { crawl: "/admin/crawl/", metrics: "/admin/metrics/", qdrant: "/admin/qdrant/" };
 
     function show(mode) {
-      for (const key of ["crawl", "metrics"]) {
+      for (const key of ["crawl", "metrics", "qdrant"]) {
         const on = key === mode;
         if (on && !frames[key].src) frames[key].src = SRC[key];
         frames[key].classList.toggle("hidden", !on);

@@ -28,6 +28,7 @@ from app.crawl_admin import db as crawl_db
 from app.db import sessions as session_db
 from app.api import crawl_admin as crawl_admin_api
 from app.api import metrics_admin
+from app.api import qdrant_admin
 from app.api import admin_shell
 from app.api import admin_auth
 
@@ -49,6 +50,7 @@ app.include_router(admin_auth.router)
 app.include_router(admin_shell.router)
 app.include_router(crawl_admin_api.router)
 app.include_router(metrics_admin.router)
+app.include_router(qdrant_admin.router)
 app.middleware("http")(admin_auth.admin_guard)
 
 _BASE = Path(__file__).resolve().parent
@@ -61,4 +63,9 @@ app.mount(
     "/admin/metrics/static",
     StaticFiles(directory=str(_BASE / "metrics" / "static")),
     name="metrics_admin_static",
+)
+app.mount(
+    "/admin/qdrant/static",
+    StaticFiles(directory=str(_BASE / "qdrant_admin" / "static")),
+    name="qdrant_admin_static",
 )

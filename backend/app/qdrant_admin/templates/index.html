@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Qdrant — Đà Nẵng RAG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/admin/qdrant/static/style.css?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    /* Riêng cho trang Qdrant */
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .toolbar .muted { font-size: 13px; color: var(--text2); }
+    .json-cell {
+      font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; color: #334155;
+      background: #f6f7f9; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+      max-width: 460px; max-height: 120px; overflow: auto; white-space: pre-wrap; word-break: break-all;
+    }
+    .pager { display: flex; align-items: center; gap: 12px; margin-top: 12px; font-size: 13px; color: var(--text2); }
+    .btn-sm { padding: 5px 12px; font-size: 12px; }
+    .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: #e7e9ee; }
+    .btn-ghost:disabled { opacity: .45; cursor: not-allowed; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .col-name { font-weight: 600; }
+    .err-text { color: var(--red); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <h1>🗄️ Qdrant <span>Dữ liệu vector — Đà Nẵng RAG</span></h1>
+      <div id="badge" class="badge badge-idle">đang tải…</div>
+    </header>
+
+    <!-- Toolbar + Update -->
+    <div class="card">
+      <div class="toolbar">
+        <div class="muted" id="updated-at">Chưa có snapshot.</div>
+        <button id="btn-update" class="btn btn-primary" onclick="update()">🔄 Cập nhật từ Qdrant</button>
+      </div>
+    </div>
+
+    <!-- Tổng quan -->
+    <div class="card" id="overview-card" style="margin-top:16px; display:none">
+      <div class="card-title"><i class="icon">📊</i> Tổng quan</div>
+      <div class="charts">
+        <div class="chart-box"><h3>Số điểm theo collection (tổng thật)</h3><canvas id="chart-collections"></canvas></div>
+        <div class="chart-box"><h3>Thực thể vs Đánh giá</h3><canvas id="chart-entity-review"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Collections -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title"><i class="icon">📦</i> Collections</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Tên collection</th><th class="num">Tổng (Qdrant)</th><th class="num">Đã lưu</th><th></th></tr>
+          </thead>
+          <tbody id="cols-body">
+            <tr><td colspan="4" class="empty-row">Chưa có dữ liệu — bấm "Cập nhật từ Qdrant".</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Phân tích collection -->
+    <div class="card" id="analysis-card" style="margin-top:16px; display:none">
+      <div class="card-title"><i class="icon">📈</i> <span id="analysis-title">Phân tích</span>
+        <span id="analysis-note" style="text-transform:none; font-weight:400; color:var(--text2)"></span>
+      </div>
+      <div class="charts">
+        <div class="chart-box"><h3>Phân bố theo Quận (Top 12)</h3><canvas id="chart-district"></canvas></div>
+        <div class="chart-box"><h3>Phân bố điểm đánh giá</h3><canvas id="chart-rating"></canvas></div>
+        <div class="chart-box" id="special-box" style="display:none"><h3 id="special-title"></h3><canvas id="chart-special"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Points -->
+    <div class="card" id="points-card" style="margin-top:16px; display:none">
+      <div class="card-title"><i class="icon">📍</i> <span id="points-title">Điểm</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Tên</th><th>Quận</th><th class="num">Đánh giá</th><th>Payload</th></tr>
+          </thead>
+          <tbody id="points-body"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button id="prev" class="btn btn-ghost btn-sm" onclick="pageDelta(-1)">← Trước</button>
+        <button id="next" class="btn btn-ghost btn-sm" onclick="pageDelta(1)">Sau →</button>
+        <span id="pageinfo"></span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = "/admin/qdrant";
+    const PAGE = 50;
+    let curCollection = null, curOffset = 0, curStored = 0;
+
+    // ── Chart.js (đồng bộ theme với dashboard metrics) ──
+    const charts = {};
+    function drawChart(id, config) {
+      if (charts[id]) charts[id].destroy();
+      charts[id] = new Chart(document.getElementById(id), config);
+    }
+    const AXIS = { ticks: { color: "#6b7280" }, grid: { color: "#e4e7ec" } };
+    const baseOpts = (extra = {}) => ({
+      responsive: true,
+      plugins: { legend: { labels: { color: "#1e2330" } } },
+      scales: { x: AXIS, y: { ...AXIS, beginAtZero: true, ...extra } },
+    });
+    const PALETTE = ["#6c5ce7", "#0f9d76", "#2f6feb", "#b9820b", "#e0454e", "#8b7bf0", "#19a3a3"];
+
+    function fmtTime(ts) {
+      if (!ts) return null;
+      try { return new Date(ts * 1000).toLocaleString("vi-VN"); } catch { return String(ts); }
+    }
+    function esc(s) {
+      return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    }
+    function displayName(p) {
+      return p.entity_name || p.place_name || p.room_name || p.parent_entity_id || "—";
+    }
+
+    async function loadSnapshot() {
+      const data = await (await fetch(`${API}/api/snapshot`)).json();
+      const badge = document.getElementById("badge");
+      const upd = document.getElementById("updated-at");
+      const when = fmtTime(data.updated_at);
+      if (when) {
+        badge.className = "badge badge-idle"; badge.textContent = "đã có dữ liệu";
+        upd.textContent = `Cập nhật lúc: ${when}` + (data.max_per_collection ? ` · tối đa ${data.max_per_collection} điểm/collection` : "");
+      } else {
+        badge.className = "badge badge-busy"; badge.textContent = "chưa có dữ liệu";
+        upd.textContent = "Chưa có snapshot — bấm Cập nhật để lấy dữ liệu từ Qdrant.";
+      }
+      const body = document.getElementById("cols-body");
+      if (!data.collections.length) {
+        body.innerHTML = `<tr><td colspan="4" class="empty-row">Chưa có dữ liệu — bấm "Cập nhật từ Qdrant".</td></tr>`;
+        document.getElementById("overview-card").style.display = "none";
+        return;
+      }
+      body.innerHTML = data.collections.map(c => `
+        <tr>
+          <td class="col-name">${esc(c.name)}${c.error ? ` <span class="err-text">(${esc(c.error)})</span>` : ""}</td>
+          <td class="num">${c.total ?? 0}</td>
+          <td class="num">${c.stored ?? 0}</td>
+          <td><button class="btn btn-run btn-sm" ${c.stored ? "" : "disabled"} onclick="viewCollection('${esc(c.name)}')">Xem</button></td>
+        </tr>`).join("");
+      renderOverviewCharts(data.collections);
+    }
+
+    function renderOverviewCharts(cols) {
+      document.getElementById("overview-card").style.display = "";
+      // Cột số điểm theo collection (tổng thật) — rút gọn tên cho dễ đọc.
+      const shortName = (n) => n.replace(/_danang$/, "");
+      drawChart("chart-collections", {
+        type: "bar",
+        data: {
+          labels: cols.map(c => shortName(c.name)),
+          datasets: [{ label: "Số điểm", backgroundColor: "#6c5ce7", data: cols.map(c => c.total ?? 0) }],
+        },
+        options: { ...baseOpts(), indexAxis: "y", plugins: { legend: { display: false } } },
+      });
+      // Donut Thực thể vs Đánh giá.
+      let entities = 0, reviews = 0;
+      cols.forEach(c => { (c.name.includes("_reviews_") ? (reviews += c.total ?? 0) : (entities += c.total ?? 0)); });
+      drawChart("chart-entity-review", {
+        type: "doughnut",
+        data: {
+          labels: ["Thực thể", "Đánh giá"],
+          datasets: [{ data: [entities, reviews], backgroundColor: ["#0f9d76", "#b9820b"] }],
+        },
+        options: { responsive: true, plugins: { legend: { labels: { color: "#1e2330" } } } },
+      });
+    }
+
+    async function update() {
+      const btn = document.getElementById("btn-update");
+      btn.disabled = true; const old = btn.textContent; btn.textContent = "⏳ Đang cập nhật…";
+      try {
+        const res = await fetch(`${API}/api/update`, { method: "POST" });
+        if (!res.ok) {
+          let msg = `Lỗi ${res.status}`;
+          try { const j = await res.json(); if (j.detail) msg = j.detail; } catch {}
+          alert("Cập nhật thất bại: " + msg);
+        } else {
+          await loadSnapshot();
+          // Nếu đang xem 1 collection, tải lại trang hiện tại.
+          if (curCollection) { curOffset = 0; await loadPoints(); }
+        }
+      } catch (e) {
+        alert("Cập nhật thất bại: " + e);
+      } finally {
+        btn.disabled = false; btn.textContent = old;
+      }
+    }
+
+    async function viewCollection(name) {
+      curCollection = name; curOffset = 0;
+      document.getElementById("points-card").style.display = "";
+      document.getElementById("points-title").textContent = `Điểm — ${name}`;
+      await Promise.all([loadStats(name), loadPoints()]);
+      document.getElementById("analysis-card").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    async function loadStats(name) {
+      const res = await fetch(`${API}/api/collections/${encodeURIComponent(name)}/stats`);
+      if (!res.ok) { document.getElementById("analysis-card").style.display = "none"; return; }
+      const s = await res.json();
+      document.getElementById("analysis-card").style.display = "";
+      document.getElementById("analysis-title").textContent = `Phân tích — ${name}`;
+      document.getElementById("analysis-note").textContent =
+        ` (dựa trên mẫu ${s.stored} điểm / tổng ${s.total})`;
+
+      // Phân bố theo Quận (cột ngang).
+      drawChart("chart-district", {
+        type: "bar",
+        data: {
+          labels: s.by_district.map(d => d.key),
+          datasets: [{ label: "Số điểm", backgroundColor: "#2f6feb", data: s.by_district.map(d => d.count) }],
+        },
+        options: { ...baseOpts(), indexAxis: "y", plugins: { legend: { display: false } } },
+      });
+      // Histogram điểm đánh giá.
+      drawChart("chart-rating", {
+        type: "bar",
+        data: {
+          labels: s.rating_hist.map(b => b.bucket),
+          datasets: [{ label: "Số điểm", backgroundColor: "#0f9d76", data: s.rating_hist.map(b => b.count) }],
+        },
+        options: { ...baseOpts(), plugins: { legend: { display: false } } },
+      });
+      // Đặc thù theo loại (ẩm thực / hạng sao) — chỉ hiện nếu có.
+      const box = document.getElementById("special-box");
+      if (s.special && s.special.items && s.special.items.length) {
+        box.style.display = "";
+        document.getElementById("special-title").textContent = s.special.label;
+        drawChart("chart-special", {
+          type: "bar",
+          data: {
+            labels: s.special.items.map(it => it.key),
+            datasets: [{ label: "Số điểm", backgroundColor: "#b9820b", data: s.special.items.map(it => it.count) }],
+          },
+          options: { ...baseOpts(), indexAxis: "y", plugins: { legend: { display: false } } },
+        });
+      } else {
+        box.style.display = "none";
+      }
+    }
+
+    async function loadPoints() {
+      const res = await fetch(`${API}/api/collections/${encodeURIComponent(curCollection)}/points?offset=${curOffset}&limit=${PAGE}`);
+      if (!res.ok) { document.getElementById("points-body").innerHTML = `<tr><td colspan="5" class="empty-row">Không tải được điểm.</td></tr>`; return; }
+      const data = await res.json();
+      curStored = data.stored || 0;
+      const rows = data.points || [];
+      const body = document.getElementById("points-body");
+      body.innerHTML = rows.length ? rows.map(pt => {
+        const p = pt.payload || {};
+        const rating = (p.rating ?? p.star_rating ?? "");
+        return `<tr>
+          <td>${esc(pt.id)}</td>
+          <td>${esc(displayName(p))}</td>
+          <td>${esc(p.district || "—")}</td>
+          <td class="num">${rating === "" ? "—" : esc(rating)}</td>
+          <td><div class="json-cell">${esc(JSON.stringify(p, null, 1))}</div></td>
+        </tr>`;
+      }).join("") : `<tr><td colspan="5" class="empty-row">Không có điểm.</td></tr>`;
+
+      const from = curStored ? curOffset + 1 : 0;
+      const to = Math.min(curOffset + rows.length, curStored);
+      document.getElementById("pageinfo").textContent = `${from}–${to} / ${curStored} (đã lưu)`;
+      document.getElementById("prev").disabled = curOffset <= 0;
+      document.getElementById("next").disabled = curOffset + PAGE >= curStored;
+    }
+
+    function pageDelta(d) {
+      const next = curOffset + d * PAGE;
+      if (next < 0 || next >= curStored) return;
+      curOffset = next; loadPoints();
+    }
+
+    loadSnapshot();
+  </script>
+</body>
+</html>

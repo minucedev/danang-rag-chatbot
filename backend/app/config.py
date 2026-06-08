@@ -26,6 +26,10 @@ ALL_COLLECTIONS = [
     COLLECTION_ACCOMMODATION_REVIEWS,
 ]
 
+# Dashboard admin /admin/qdrant: số điểm tối đa lưu vào file snapshot MỖI collection
+# (vẫn hiển thị tổng số thật từ Qdrant). Giữ file gọn + tải nhanh.
+QDRANT_SNAPSHOT_MAX_PER_COLLECTION: int = int(os.getenv("QDRANT_SNAPSHOT_MAX_PER_COLLECTION", "500"))
+
 # Models
 EMBED_MODEL_NAME: str = os.getenv("EMBED_MODEL_NAME", "BAAI/bge-m3")
 

@@ -101,6 +101,7 @@ from app.api import auth as auth_api
 from app.api import admin_shell
 from app.api import crawl_admin as crawl_admin_api
 from app.api import metrics_admin
+from app.api import qdrant_admin
 from app.api import admin_auth
 
 
@@ -240,6 +241,7 @@ app.include_router(admin_auth.router)
 app.include_router(admin_shell.router)
 app.include_router(crawl_admin_api.router)
 app.include_router(metrics_admin.router)
+app.include_router(qdrant_admin.router)
 
 # Gác cookie cho toàn bộ /admin* (trừ login/logout/static). Đăng ký sau router.
 app.middleware("http")(admin_auth.admin_guard)
@@ -256,6 +258,13 @@ app.mount(
     "/admin/metrics/static",
     StaticFiles(directory=str(Path(__file__).resolve().parent / "metrics" / "static")),
     name="metrics_admin_static",
+)
+
+# Static cho dashboard qdrant — phục vụ tại /admin/qdrant/static/*
+app.mount(
+    "/admin/qdrant/static",
+    StaticFiles(directory=str(Path(__file__).resolve().parent / "qdrant_admin" / "static")),
+    name="qdrant_admin_static",
 )
 
 # Module-level placeholder so health.py can check before pipeline loads
