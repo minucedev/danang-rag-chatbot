@@ -12,10 +12,12 @@ Browser (http://localhost:3000)
         │ HTTP + SSE streaming
         ▼
 FastAPI (http://localhost:8000)
-  ├─ POST /api/chat/stream              chat streaming (SSE)
+  ├─ POST /api/auth/{register,login,logout}, GET /api/auth/me  xác thực (token)
+  ├─ POST /api/chat/stream              chat streaming (SSE, cần token)
   ├─ GET/POST/PATCH/DELETE /api/sessions lịch sử hội thoại
   ├─ GET/PUT/DELETE /api/profile        profile theo session
   ├─ POST /api/recommend                gợi ý theo profile
+  ├─ GET /admin                         dashboard quản trị (Crawl/Metrics/Qdrant, cookie role admin)
   ├─ POST /api/admin/crawl/*            trigger crawl thủ công
   └─ GET /api/health                    health check
         │
@@ -225,6 +227,71 @@ npm run dev
 
 Mở `http://localhost:3000`.
 
+> **Backend ở máy/cổng khác?** Tạo `frontend/.env.local` với
+> `NEXT_PUBLIC_API_URL=http://<host>:<port>` (mặc định `http://localhost:8000`). Lưu ý **CORS**:
+> backend chỉ cho phép origin `localhost:3000` / `127.0.0.1:3000` — nếu chạy frontend ở origin
+> khác, thêm origin vào `CORSMiddleware` trong `backend/app/main.py`.
+
+---
+
+## Tài Khoản & Đăng Nhập
+
+Chatbot **bắt buộc đăng nhập** — mở `/chat` khi chưa đăng nhập sẽ tự chuyển về `/login`.
+
+**Cách 1 — Tự đăng ký (người dùng thường):** mở `http://localhost:3000/register`, tạo tài khoản
+(tài khoản ≥ 3 ký tự, mật khẩu ≥ 6 ký tự) → tự đăng nhập và vào `/chat`. Tài khoản tự đăng ký luôn
+là role `user`.
+
+**Cách 2 — Tạo bằng script (bắt buộc cho tài khoản admin):**
+
+```powershell
+cd backend                                          # PHẢI ở thư mục backend để ghi đúng data/chats.db
+python scripts/create_user.py <username> <password>              # role user
+python scripts/create_user.py <username> <password> --role admin # role admin
+```
+
+Ví dụ:
+
+```powershell
+cd backend
+python scripts/create_user.py admin admin123 --role admin
+python scripts/create_user.py user1 user1234
+```
+
+- Chạy từ thư mục `backend/` để script ghi vào **đúng** `backend/data/chats.db` (cùng DB server
+  dùng — `DB_PATH` là đường dẫn tương đối theo thư mục chạy). Lần đầu chạy mất ~1 phút do import.
+- Nếu username đã tồn tại → chỉ cập nhật role (không đổi mật khẩu).
+
+**Phân biệt vai trò:** `user` chỉ dùng chatbot; `admin` thấy thêm chip "Quản trị viên" và lối vào
+**Admin** (mở trang `/admin`).
+
+---
+
+## Trang Quản Trị (`/admin`)
+
+Truy cập `http://localhost:8000/admin` → đăng nhập bằng tài khoản **role admin** (cổng cookie
+riêng, tách khỏi đăng nhập chatbot). 3 tab:
+
+| Tab | Chức năng |
+|-----|-----------|
+| **Crawl** | Điều phối crawl Foody / Traveloka / Booking, xem log realtime, quản lý nguồn |
+| **Metrics** | Chạy benchmark RAG + report card (cần **pipeline thật** — chỉ chạy đầy đủ ở `app.main`) |
+| **Qdrant** | Xem dữ liệu Qdrant qua *file snapshot* + nút **Cập nhật** (fetch lại từ Qdrant) + biểu đồ thống kê (số điểm/collection, phân bố theo Quận, rating, loại hình / hạng sao) |
+
+**Entrypoint nhẹ — xem dashboard mà KHÔNG nạp model** (mở nhanh trên máy không GPU):
+
+```powershell
+cd backend
+python -m uvicorn app.admin_app:app --port 8000
+```
+
+Phục vụ `/admin` + đăng nhập cookie + DB (không nạp BGE-M3/LLM/Qdrant). Hợp để xem **Crawl**/
+**Qdrant**; nút "Chạy eval" ở tab Metrics cần pipeline thật nên phải dùng `app.main`.
+
+> Nút **Cập nhật** ở tab Qdrant gọi trực tiếp Qdrant Cloud (cần `QDRANT_URL`/`QDRANT_API_KEY` trong
+> `backend/.env`); dữ liệu lưu vào `backend/data/qdrant_snapshot.json` (gitignored), trang đọc lại
+> từ file nên xem được kể cả khi offline.
+
 ---
 
 ## Tính Năng
@@ -277,6 +344,10 @@ Mở `http://localhost:3000`.
 
 | Method | Endpoint | Mô tả |
 |--------|----------|-------|
+| POST | `/api/auth/register` | Tự đăng ký (role user), trả token |
+| POST | `/api/auth/login` | Đăng nhập, trả token |
+| POST | `/api/auth/logout` | Đăng xuất (thu hồi token) |
+| GET | `/api/auth/me` | Thông tin user hiện tại (id, username, role) |
 | POST | `/api/chat/stream` | Chat streaming (SSE) |
 | GET | `/api/sessions` | Danh sách sessions |
 | POST | `/api/sessions` | Tạo session mới |
@@ -293,7 +364,10 @@ Mở `http://localhost:3000`.
 | POST | `/api/admin/crawl/events` | Trigger event crawl (`X-Admin-Token` header) |
 | POST | `/api/admin/crawl/places` | Trigger place crawl (`X-Admin-Token` header) |
 
-**SSE events từ `/api/chat/stream`:** `meta` → `waiting?` → `intent` → `sources` → `token*` → `error?` → `done`
+> Trừ `/api/auth/register` và `/api/auth/login`, các endpoint trên yêu cầu header
+> `Authorization: Bearer <token>` (token lấy từ login/register).
+
+**SSE events từ `/api/chat/stream`:** `meta` → `waiting?` → `intent` → `sources` → `fallback?` → `token*` → `error?` → `done`
 
 ---
 
@@ -303,17 +377,26 @@ Mở `http://localhost:3000`.
 PPBL_chat/
 ├── backend/
 │   ├── app/
-│   │   ├── api/             chat, sessions, health, profile, recommend, admin
+│   │   ├── api/             chat, sessions, health, profile, recommend, events,
+│   │   │                    favorites, itineraries, auth, deps, admin,
+│   │   │                    admin_auth, admin_shell, crawl_admin, metrics_admin,
+│   │   │                    qdrant_admin
 │   │   ├── rag/             analyzer, intent, retrieval, rerank, llm,
 │   │   │                    pipeline, memory, gemini_fallback, recommend,
 │   │   │                    events_retrieval, schemas
 │   │   ├── crawlers/        events_crawler, places_crawler, serpapi_adapter
-│   │   ├── db/              sessions, profiles, events, missed_queries (schema.sql)
+│   │   ├── crawl_admin/     engine crawl + ingest Qdrant (schema.sql, templates, static)
+│   │   ├── metrics/         benchmark RAG (store, templates, static)
+│   │   ├── qdrant_admin/    dashboard Qdrant (templates/index.html, static/style.css)
+│   │   ├── db/              sessions, auth, profiles, favorites, itineraries,
+│   │   │                    qa_cache, events, missed_queries (schema.sql)
 │   │   ├── utils/           nfc.py (Unicode normalize), slugify_vn.py
-│   │   ├── main.py          FastAPI app + lifespan (startup/shutdown)
+│   │   ├── main.py          FastAPI app đầy đủ + lifespan (startup/shutdown)
+│   │   ├── admin_app.py     Entrypoint NHẸ chỉ phục vụ /admin (không nạp model)
 │   │   └── config.py        Tất cả env vars
+│   ├── scripts/             create_user.py (tạo/cấp quyền tài khoản)
 │   ├── tests/               pytest tests (không cần GPU)
-│   ├── data/                chats.db (tự tạo, gitignored)
+│   ├── data/                chats.db, crawl.db, qdrant_snapshot.json (tự tạo, gitignored)
 │   ├── .env.example
 │   ├── requirements.txt
 │   └── requirements-dev.txt
@@ -339,8 +422,9 @@ PPBL_chat/
 ```powershell
 cd backend
 pip install -r requirements-dev.txt
-pytest tests/ -q
-# Kỳ vọng: 113 passed, 1 xfailed
+pytest tests/ -q              # toàn bộ test (không cần GPU); kỳ vọng: tất cả pass
+# Chạy nhanh một nhóm:
+pytest tests/test_auth.py tests/test_qdrant_admin.py tests/test_db_migration.py -q
 ```
 
 ### Frontend type check + lint
