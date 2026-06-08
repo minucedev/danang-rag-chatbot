@@ -18,14 +18,6 @@ _LIST_FILTER_KEYS = [
     "cancellation_policy", "children_policy",
 ]
 
-# Tín hiệu "sự kiện" rõ ràng → ép intent=event_search dù analyzer (model nhỏ 0.5B) phân loại
-# sai. Bao cả có dấu lẫn không dấu, không phân biệt hoa thường.
-_EVENT_RE = re.compile(
-    r"(sự kiện|su kien|lễ hội|le hoi|festival|\bevent\b|có gì chơi|co gi choi|"
-    r"có gì diễn ra|co gi dien ra|hoạt động gì|hoat dong gi)",
-    re.IGNORECASE,
-)
-
 
 def _split_tokens(value: Any) -> list[str]:
     """Chuẩn hóa giá trị (str hoặc list) thành list token chữ thường, đã dedup."""
@@ -255,9 +247,7 @@ class LLMQueryAnalyzer:
             "2. Chỉ dùng 'hotel_search'/'restaurant_search'/'place_search'/'room_search' cho tìm kiếm "
             "CHUNG CHUNG (không nêu tên cụ thể và không có ngữ cảnh thực thể trước đó).\n"
             "3. 'needs_rag'=false CHỈ khi là chitchat/ngoài phạm vi du lịch Đà Nẵng "
-            "(vd thời tiết, vé máy bay, 'bạn là ai').\n"
-            "4. Câu hỏi về 'sự kiện/lễ hội/hoạt động/có gì chơi/có gì diễn ra' (thường kèm thời gian "
-            "'gần đây/sắp tới/cuối tuần/tối nay/hôm nay') → intent 'event_search'.\n\n"
+            "(vd thời tiết, vé máy bay, 'bạn là ai').\n\n"
             "Schema JSON bắt buộc:\n"
             "{\n"
             '  "needs_rag": true | false,\n'
@@ -384,28 +374,6 @@ Trả về JSON:
 }}
 
 ### VÍ DỤ 10:
-Người dùng: "Đà Nẵng gần đây có sự kiện gì không?"
-Trả về JSON:
-{{
-  "needs_rag": true,
-  "intent": "event_search",
-  "entity": [],
-  "rewritten_query": "sự kiện",
-  "filters": {{}}
-}}
-
-### VÍ DỤ 11:
-Người dùng: "Cuối tuần này có hoạt động gì vui ở Đà Nẵng?"
-Trả về JSON:
-{{
-  "needs_rag": true,
-  "intent": "event_search",
-  "entity": [],
-  "rewritten_query": "sự kiện hoạt động",
-  "filters": {{"best_time_to_visit": ["cuối tuần"]}}
-}}
-
-### VÍ DỤ 12:
 Người dùng: "Khách hàng nhận xét thế nào về quán hải sản Năm Đảnh?"
 Trả về JSON:
 {{
@@ -416,7 +384,7 @@ Trả về JSON:
   "filters": {{}}
 }}
 
-### VÍ DỤ 13 (CÓ LỊCH SỬ HỘI THOẠI):
+### VÍ DỤ 11 (CÓ LỊCH SỬ HỘI THOẠI):
 Lịch sử hội thoại:
 Người dùng: Khách hàng nhận xét thế nào về quán hải sản Năm Đảnh?
 Trợ lý: Quán hải sản Năm Đảnh được đánh giá cao...
@@ -430,7 +398,7 @@ Trả về JSON:
   "filters": {{}}
 }}
 
-### VÍ DỤ 14 (CÓ LỊCH SỬ HỘI THOẠI):
+### VÍ DỤ 12 (CÓ LỊCH SỬ HỘI THOẠI):
 Lịch sử hội thoại:
 Người dùng: tôi muốn biết nhận xét của khách hàng về Le Sands Oceanfront Danang Hotel
 Trợ lý: Khách hàng rất hài lòng với Le Sands Oceanfront Danang Hotel...
@@ -444,7 +412,7 @@ Trả về JSON:
   "filters": {{}}
 }}
 
-### VÍ DỤ 15 (HỎI CHUNG CHUNG KHI CÓ LỊCH SỬ):
+### VÍ DỤ 13 (HỎI CHUNG CHUNG KHI CÓ LỊCH SỬ):
 Lịch sử hội thoại:
 Người dùng: tôi muốn biết nhận xét của khách hàng về Le Sands Oceanfront Danang Hotel
 Trợ lý: Khách hàng rất hài lòng với Le Sands Oceanfront Danang Hotel...
@@ -525,14 +493,6 @@ Trả về JSON:"""
                     needs_rag = intent_enum != QueryIntent.CHITCHAT
                 if not needs_rag:
                     intent_enum = QueryIntent.CHITCHAT
-
-                # Chốt tất định: tín hiệu sự kiện rõ ràng → event_search, kể cả khi analyzer
-                # (model nhỏ 0.5B) phân loại nhầm hoặc trả needs_rag=false. KHÔNG đè
-                # specific_search (hỏi đích danh 1 thực thể) để không cướp câu hỏi đó.
-                if intent_enum not in (QueryIntent.EVENT_SEARCH, QueryIntent.SPECIFIC_SEARCH) \
-                        and _EVENT_RE.search(query):
-                    intent_enum = QueryIntent.EVENT_SEARCH
-                    needs_rag = True
 
                 # entity[] thay cho extract_specific_entities riêng của notebook
                 raw_entity = parsed_json.get("entity")
