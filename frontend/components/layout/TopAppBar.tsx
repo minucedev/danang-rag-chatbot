@@ -54,13 +54,26 @@ export function TopAppBar() {
 
         {/* Right actions — desktop only */}
         <div className="hidden md:flex items-center gap-2">
+          {/* Chip vai trò: phân biệt rõ admin vs người dùng thường */}
+          {user && (
+            <span
+              className={
+                user.role === "admin"
+                  ? "text-xs font-semibold px-2 py-0.5 rounded-full bg-primary-container text-on-primary-container"
+                  : "text-xs font-medium px-2 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant"
+              }
+            >
+              {user.role === "admin" ? "Quản trị viên" : "Thành viên"}
+            </span>
+          )}
           {user?.role === "admin" && (
             <a
               href={ADMIN_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-on-surface-variant text-sm hover:text-primary transition-colors mr-1"
+              className="flex items-center gap-1 text-on-surface-variant text-sm hover:text-primary transition-colors mr-1"
             >
+              <span className="material-symbols-outlined text-lg">shield_person</span>
               Admin
             </a>
           )}

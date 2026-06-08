@@ -51,10 +51,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     staleTime: 5 * 60_000,
   });
 
-  // Guard: đã biết là CHƯA có token và route không public → đẩy về /login.
+  // Guard 2 chiều (đã biết trạng thái token):
+  // - CHƯA đăng nhập + route bảo vệ → /login.
+  // - ĐÃ đăng nhập + đang ở trang public (/login, /register) → /chat (tách bạch luồng).
   useEffect(() => {
     if (hasToken === null) return;
     if (!hasToken && !isPublic) router.replace("/login");
+    else if (hasToken && isPublic) router.replace("/chat");
   }, [hasToken, isPublic, router]);
 
   async function login(username: string, password: string) {
@@ -108,6 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
   }
   if (!isPublic && !hasToken) return null; // đang redirect sang /login
+  if (isPublic && hasToken === true) return null; // đã đăng nhập → đang redirect sang /chat
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

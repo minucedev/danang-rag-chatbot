@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.api.deps import get_current_user
 from app.db import auth as auth_db
@@ -15,14 +15,28 @@ from app.db import auth as auth_db
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+def _strip_username(v):
+    """Bỏ khoảng trắng đầu/cuối để '  alice ' và 'alice' là cùng một tài khoản
+    (kể cả khi gọi API trực tiếp, không qua FE đã .trim()). Giá trị không phải chuỗi
+    để nguyên cho pydantic báo lỗi type."""
+    return v.strip() if isinstance(v, str) else v
+
+
 class LoginBody(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=1, max_length=256)
+
+    # mode="before": chạy trước khi ràng buộc min_length của field được áp, nên min_length
+    # kiểm tra trên giá trị ĐÃ strip → username toàn khoảng trắng (sau strip rỗng) bị loại.
+    _strip = field_validator("username", mode="before")(_strip_username)
 
 
 class RegisterBody(BaseModel):
     username: str = Field(..., min_length=3, max_length=64)
     password: str = Field(..., min_length=6, max_length=256)
+
+    # min_length=3 áp lên username đã strip (xem LoginBody._strip).
+    _strip = field_validator("username", mode="before")(_strip_username)
 
 
 class UserOut(BaseModel):

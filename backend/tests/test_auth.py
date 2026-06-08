@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.api.deps import get_current_user
 from app.api import auth as auth_api
@@ -121,6 +122,51 @@ async def test_login_returns_role(tmp_db):
     await auth_db.create_user("withrole", "pw", role="admin")
     out = await auth_api.login(auth_api.LoginBody(username="withrole", password="pw"))
     assert out.user.role == "admin"
+
+
+# ─── Chuẩn hoá username (trim khoảng trắng) ──────────────────────────────────
+async def test_register_strips_username(tmp_db):
+    out = await auth_api.register(auth_api.RegisterBody(username="  spacey  ", password="secret6"))
+    assert out.user.username == "spacey"  # đã trim trước khi lưu
+    assert await auth_db.get_user_by_username("spacey") is not None
+
+
+async def test_login_strips_username(tmp_db):
+    await auth_db.create_user("trimmed", "pw")
+    # Đăng nhập với khoảng trắng thừa vẫn khớp đúng tài khoản.
+    out = await auth_api.login(auth_api.LoginBody(username="  trimmed  ", password="pw"))
+    assert out.user.username == "trimmed"
+
+
+def test_register_whitespace_only_username_rejected():
+    # Toàn khoảng trắng → sau strip rỗng → < 3 ký tự → ValidationError.
+    with pytest.raises(ValidationError):
+        auth_api.RegisterBody(username="    ", password="secret6")
+
+
+def test_register_short_after_strip_rejected():
+    with pytest.raises(ValidationError):
+        auth_api.RegisterBody(username="  ab  ", password="secret6")  # 'ab' < 3
+
+
+async def test_register_duplicate_after_strip_conflict(tmp_db):
+    # Lý do tồn tại của validator: '  alice  ' và 'alice' là CÙNG tài khoản → phải 409.
+    await auth_db.create_user("alice", "pw")
+    with pytest.raises(HTTPException) as ei:
+        await auth_api.register(auth_api.RegisterBody(username="  alice  ", password="secret6"))
+    assert ei.value.status_code == 409
+
+
+def test_login_whitespace_only_username_rejected():
+    # LoginBody min_length=1: sau strip rỗng → ValidationError (nhánh khác register min_length=3).
+    with pytest.raises(ValidationError):
+        auth_api.LoginBody(username="   ", password="pw")
+
+
+def test_password_is_not_stripped():
+    # Khoảng trắng trong mật khẩu là có nghĩa — validator CHỈ áp cho username, không cho password.
+    assert auth_api.LoginBody(username="u", password="  pw  ").password == "  pw  "
+    assert auth_api.RegisterBody(username="user", password="  secret6  ").password == "  secret6  "
 
 
 # ─── Cách ly session theo user ───────────────────────────────────────────────
