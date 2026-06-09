@@ -105,6 +105,15 @@ header h1 span {
   background: var(--amber);
 }
 
+.badge-error {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.badge-error::before {
+  background: var(--red);
+}
+
 @keyframes pulse {
 
   0%,

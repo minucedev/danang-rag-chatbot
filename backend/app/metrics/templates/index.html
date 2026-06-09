@@ -86,6 +86,12 @@
     const mean = (arr) => arr.length ? arr.reduce((a, b) => a + (b ?? 0), 0) / arr.length : 0;
     const charts = {};
 
+    async function getJSON(url, opts) {
+      const res = await fetch(url, opts);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
     function drawChart(id, config) {
       if (charts[id]) charts[id].destroy();
       charts[id] = new Chart(document.getElementById(id), config);
@@ -177,14 +183,14 @@
     }
 
     async function loadRun(runId) {
-      const data = await (await fetch(`${API}/api/runs/${runId}`)).json();
+      const data = await getJSON(`${API}/api/runs/${runId}`);
       if (data.error) return;
       renderReportCard(data);
       renderCharts(data);
     }
 
     async function loadRuns() {
-      const runs = await (await fetch(`${API}/api/runs`)).json();
+      const runs = await getJSON(`${API}/api/runs`);
       document.getElementById("runs-body").innerHTML = runs.map(r => `
         <tr>
           <td><span class="run-link" data-id="${r.id}">${r.id}</span></td>
@@ -197,7 +203,7 @@
 
     let lastLatestId = null;
     async function loadState() {
-      const { state, latest } = await (await fetch(`${API}/api/state`)).json();
+      const { state, latest } = await getJSON(`${API}/api/state`);
       const b = document.getElementById("status-badge");
       const p = document.getElementById("progress");
       if (state.running) {
@@ -220,22 +226,35 @@
     document.getElementById("run-btn").onclick = async () => {
       const suite = document.getElementById("suite").value;
       const enable_judge = document.getElementById("judge").checked;
-      const res = await fetch(`${API}/api/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ suite, enable_judge }),
-      });
-      if (res.status === 409) alert("Đang có một lượt eval chạy.");
+      try {
+        const res = await fetch(`${API}/api/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ suite, enable_judge }),
+        });
+        if (res.status === 409) alert("Đang có một lượt eval chạy.");
+        else if (!res.ok) alert(`Không khởi chạy được (HTTP ${res.status}).`);
+      } catch (e) {
+        alert("Không khởi chạy được: lỗi kết nối.");
+      }
     };
 
     const logEl = document.getElementById("log");
     const es = new EventSource(`${API}/api/logs/stream`);
     es.onmessage = (e) => { logEl.textContent += e.data + "\n"; logEl.scrollTop = logEl.scrollHeight; };
+    es.onerror = () => { logEl.textContent += "[mất kết nối log — đang thử lại…]\n"; logEl.scrollTop = logEl.scrollHeight; };
 
     async function tick() {
-      const running = await loadState();
-      await loadRuns();
-      setTimeout(tick, running ? 2000 : 7000);
+      let running = false;
+      try {
+        running = await loadState();
+        await loadRuns();
+      } catch (e) {
+        const b = document.getElementById("status-badge");
+        b.textContent = "⚠ mất kết nối"; b.className = "badge badge-error";
+      } finally {
+        setTimeout(tick, running ? 2000 : 7000);
+      }
     }
     tick();
   </script>

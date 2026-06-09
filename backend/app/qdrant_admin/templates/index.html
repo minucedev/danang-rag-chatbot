@@ -100,7 +100,7 @@
   <script>
     const API = "/admin/qdrant";
     const PAGE = 50;
-    let curCollection = null, curOffset = 0, curStored = 0;
+    let curCollection = null, curOffset = 0, curStored = 0, pointsLoading = false;
 
     // ── Chart.js (đồng bộ theme với dashboard metrics) ──
     const charts = {};
@@ -255,6 +255,8 @@
     }
 
     async function loadPoints() {
+      pointsLoading = true;
+      try {
       const res = await fetch(`${API}/api/collections/${encodeURIComponent(curCollection)}/points?offset=${curOffset}&limit=${PAGE}`);
       if (!res.ok) { document.getElementById("points-body").innerHTML = `<tr><td colspan="5" class="empty-row">Không tải được điểm.</td></tr>`; return; }
       const data = await res.json();
@@ -278,9 +280,13 @@
       document.getElementById("pageinfo").textContent = `${from}–${to} / ${curStored} (đã lưu)`;
       document.getElementById("prev").disabled = curOffset <= 0;
       document.getElementById("next").disabled = curOffset + PAGE >= curStored;
+      } finally {
+        pointsLoading = false;
+      }
     }
 
     function pageDelta(d) {
+      if (pointsLoading) return;
       const next = curOffset + d * PAGE;
       if (next < 0 || next >= curStored) return;
       curOffset = next; loadPoints();

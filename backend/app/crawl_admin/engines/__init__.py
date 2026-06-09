@@ -296,7 +296,15 @@ def _hotel_runner(make_engine, data_dir: str, engine_key: str):
 
         try:
             await ctx.log("info", f"Khởi chạy engine {engine_key} (Playwright sync trong thread, last_crawl={last_run_at})…")
-            await loop.run_in_executor(None, _execute_crawl)
+            # Trần thời gian: nếu browser treo, hủy chờ để nhả _run_lock thay vì kẹt "running" vĩnh viễn.
+            # Lưu ý: run_in_executor không hủy được thread → thread Playwright còn chạy nền tới khi tự kết thúc.
+            await asyncio.wait_for(
+                loop.run_in_executor(None, _execute_crawl),
+                timeout=config.HOTEL_RUN_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            await ctx.log("error", f"Engine {engine_key} quá {config.HOTEL_RUN_TIMEOUT_SEC}s — hủy chờ, giải phóng lock.")
+            raise
         finally:
             root.removeHandler(handler)
             root.setLevel(old_level)

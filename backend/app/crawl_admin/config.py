@@ -64,6 +64,8 @@ SCHEDULE_HOURS = int(os.getenv("CRAWL_SCHEDULE_HOURS", "24"))
 JOB_FRESHNESS_HOURS = int(os.getenv("CRAWL_JOB_FRESHNESS_HOURS", "20"))
 
 # Giới hạn engine khách sạn (orchestrate as-is) — mặc định THẤP để tránh bị chặn
+# Trần thời gian 1 lượt engine khách sạn (Playwright sync) — chặn browser treo giữ _run_lock vĩnh viễn.
+HOTEL_RUN_TIMEOUT_SEC = int(os.getenv("CRAWL_HOTEL_RUN_TIMEOUT_SEC", "1800"))  # 30'
 TRAVELOKA_MAX_PAGES = int(os.getenv("CRAWL_TRAVELOKA_MAX_PAGES", "3"))
 TRAVELOKA_MAX_HOTELS = int(os.getenv("CRAWL_TRAVELOKA_MAX_HOTELS", "30"))
 TRAVELOKA_REVIEWS = int(os.getenv("CRAWL_TRAVELOKA_REVIEWS", "10"))

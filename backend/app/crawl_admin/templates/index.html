@@ -100,8 +100,14 @@
     const fmtTime = (ts) => ts ? new Date(ts * 1000).toLocaleString("vi-VN") : "—";
     const stClass = (s) => ({ done: "st-done", error: "st-error", running: "st-running", crawling: "st-crawling", pending: "st-pending" }[s] || "");
 
+    async function getJSON(url, opts) {
+      const res = await fetch(url, opts);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
     async function loadJobs() {
-      const jobs = await (await fetch(`${API}/api/jobs`)).json();
+      const jobs = await getJSON(`${API}/api/jobs`);
       document.getElementById("jobs").innerHTML = jobs.map(j => `
     <div class="engine ${j.running ? 'running' : ''}">
       <div class="engine-name">${j.label}</div>
@@ -112,14 +118,21 @@
       <button data-key="${j.key}" class="btn btn-run run-job" ${j.running ? 'disabled' : ''}>
         ${j.running ? "⏳ đang chạy…" : "▶ Chạy"}</button>
     </div>`).join("");
-      document.querySelectorAll(".run-job").forEach(b => b.onclick = async () => {
-        const res = await fetch(`${API}/api/jobs/${b.dataset.key}/run`, { method: "POST" });
+      document.querySelectorAll(".run-job").forEach(b => b.onclick = () => triggerRun(`${API}/api/jobs/${b.dataset.key}/run`));
+    }
+
+    async function triggerRun(url) {
+      try {
+        const res = await fetch(url, { method: "POST" });
         if (res.status === 409) alert("Đang có một lượt crawl chạy.");
-      });
+        else if (!res.ok) alert(`Không khởi chạy được (HTTP ${res.status}).`);
+      } catch (e) {
+        alert("Không khởi chạy được: lỗi kết nối.");
+      }
     }
 
     async function loadRuns() {
-      const runs = await (await fetch(`${API}/api/runs`)).json();
+      const runs = await getJSON(`${API}/api/runs`);
       document.getElementById("runs-body").innerHTML = runs.map(r => `
     <tr>
       <td>${r.id}</td><td>${r.engine || ""}</td><td>${r.trigger}</td>
@@ -129,7 +142,7 @@
     }
 
     async function loadEntities() {
-      const rows = await (await fetch(`${API}/api/entities`)).json();
+      const rows = await getJSON(`${API}/api/entities`);
       const foodyRows = rows.filter(e => !e.url.includes("booking.com") && !e.url.includes("traveloka.com"));
       document.getElementById("entities-body").innerHTML = foodyRows.slice(0, 200).map(e => `
     <tr>
@@ -140,7 +153,7 @@
     }
 
     async function loadHotels() {
-      const rows = await (await fetch(`${API}/api/hotels`)).json();
+      const rows = await getJSON(`${API}/api/hotels`);
       document.getElementById("hotels-body").innerHTML = rows.slice(0, 200).map(h => `
     <tr>
       <td>${h.name || "<span style='color:var(--text2)'>(chưa có)</span>"}</td>
@@ -152,7 +165,7 @@
     }
 
     async function loadState() {
-      const { state } = await (await fetch(`${API}/api/state`)).json();
+      const { state } = await getJSON(`${API}/api/state`);
       const b = document.getElementById("status-badge");
       if (state.running) {
         b.textContent = "⏳ " + (state.engine || "crawling");
@@ -164,19 +177,24 @@
       return state.running;
     }
 
-    document.getElementById("run-all").onclick = async () => {
-      const res = await fetch(`${API}/api/jobs/run-all`, { method: "POST" });
-      if (res.status === 409) alert("Đang có một lượt crawl chạy.");
-    };
+    document.getElementById("run-all").onclick = () => triggerRun(`${API}/api/jobs/run-all`);
 
     const logEl = document.getElementById("log");
     const es = new EventSource(`${API}/api/logs/stream`);
     es.onmessage = (e) => { logEl.textContent += e.data + "\n"; logEl.scrollTop = logEl.scrollHeight; };
+    es.onerror = () => { logEl.textContent += "[mất kết nối log — đang thử lại…]\n"; logEl.scrollTop = logEl.scrollHeight; };
 
     async function tick() {
-      const running = await loadState();
-      await Promise.all([loadJobs(), loadRuns(), loadEntities(), loadHotels()]);
-      setTimeout(tick, running ? 2500 : 7000);
+      let running = false;
+      try {
+        running = await loadState();
+        await Promise.all([loadJobs(), loadRuns(), loadEntities(), loadHotels()]);
+      } catch (e) {
+        const b = document.getElementById("status-badge");
+        b.textContent = "⚠ mất kết nối"; b.className = "badge badge-error";
+      } finally {
+        setTimeout(tick, running ? 2500 : 7000);
+      }
     }
     tick();
   </script>
