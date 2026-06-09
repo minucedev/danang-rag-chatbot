@@ -1,3 +1,5 @@
+import { getToken } from "@/lib/auth";
+
 export type SSEEventType = "meta" | "intent" | "sources" | "token" | "done" | "error" | "waiting";
 
 export interface SSEEvent {
@@ -27,9 +29,13 @@ export async function* streamSSE(
   signal: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
   const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const token = getToken();
   const res = await fetch(`${BASE}${url}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
     signal,
   });

@@ -63,6 +63,20 @@ Trả về JSON:
   "standalone_query": "Khách sạn Novotel Danang Premier Han River có những loại phòng nào và giá của từng phòng"
 }}
 ```
+### VÍ DỤ 4:
+Lịch sử hội thoại gần đây:
+USER: Phòng khách sạn dưới 1 triệu mỗi đêm?
+ASSISTANT: Dưới 1 triệu mỗi đêm, bạn có thể tham khảo Khách sạn A, Khách sạn B...
+
+Câu hỏi mới: "còn khách sạn nào khác không?"
+Trả về JSON:
+```json
+{{
+  "is_followup": true,
+  "is_topic_shift": false,
+  "standalone_query": "Ngoài những khách sạn trên còn khách sạn nào khác không"
+}}
+```
 
 ### BÀI TẬP THỰC TẾ:
 Lịch sử hội thoại gần đây:
@@ -229,3 +243,6 @@ def build_final_context_prompt(summary_json: Optional[str], history: list[dict],
     history_msgs = build_history_messages(history, max_turns=max_turns)
     messages.extend(history_msgs)
     return messages
+
+
+

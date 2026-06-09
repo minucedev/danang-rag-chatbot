@@ -594,9 +594,8 @@ class RAGPipeline:
 
             # Đếm số ngày thực (không tính Lưu trú)
             num_days_llm = sum(1 for d in result if isinstance(d.get("day"), int))
-            num_days_fb  = sum(1 for d in fallback if isinstance(d.get("day"), int))
-            if num_days_llm < num_days_fb:
-                print(f"[pipeline] itinerary_planner: LLM tạo {num_days_llm} ngày < {num_days_fb} ngày yêu cầu → dùng fallback")
+            if num_days_llm == 0:
+                print(f"[pipeline] itinerary_planner: LLM tạo {num_days_llm} ngày → dùng fallback")
                 return fallback
 
             return _normalize_plan(result)
