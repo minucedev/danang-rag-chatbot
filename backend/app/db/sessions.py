@@ -74,8 +74,10 @@ async def create_session(title: str, user_id: Optional[str] = None) -> str:
 
 async def list_sessions(user_id: str, limit: int = 50, offset: int = 0) -> List[SessionEntity]:
     async with _db_conn().execute(
-        "SELECT id, title, created_at, updated_at, summary FROM sessions "
-        "WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+        "SELECT id, title, created_at, updated_at, summary FROM sessions s "
+        "WHERE user_id = ? "
+        "AND EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id) "
+        "ORDER BY updated_at DESC LIMIT ? OFFSET ?",
         (user_id, limit, offset),
     ) as cur:
         rows = await cur.fetchall()
