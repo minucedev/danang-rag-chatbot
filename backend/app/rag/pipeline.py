@@ -58,7 +58,12 @@ _CHITCHAT_SYSTEM_PROMPT = (
 
 _ITINERARY_PLANNER_SYSTEM_PROMPT = (
     "Bạn là trợ lý lập kế hoạch lịch trình du lịch Đà Nẵng.\n"
-    "Nhiệm vụ của bạn là phân tích yêu cầu của người dùng và tạo ra một khung kế hoạch (skeleton itinerary) chi tiết theo từng ngày và các buổi trong ngày.\n\n"
+    "Nhiệm vụ của bạn là phân tích yêu cầu của người dùng và tạo ra một khung kế hoạch (skeleton itinerary) dưới dạng một JSON array thuần túy theo từng ngày và các buổi trong ngày.\n\n"
+    "Quy tắc chọn số lượng ngày hoạt động (BẮT BUỘC):\n"
+    "1. Đếm số ngày người dùng yêu cầu (ví dụ: '3 ngày 2 đêm' -> 3 ngày hoạt động, '2 ngày 1 đêm' -> 2 ngày hoạt động, '1 ngày' -> 1 ngày hoạt động).\n"
+    "2. Nếu không nói rõ số ngày, mặc định tạo lịch trình 3 ngày hoạt động.\n"
+    "3. Tạo đúng số lượng phần ngày hoạt động tương ứng (day: 1, day: 2, ...).\n"
+    "4. Ở cuối mảng, LUÔN LUÔN tạo thêm một phần dành cho Lưu trú (day: 'Lưu trú').\n\n"
     "Để lịch trình hợp lý, mượt mà và tránh mất thời gian di chuyển:\n"
     "1. Phân bổ các buổi trong cùng một ngày ở các khu vực gần nhau hoặc cùng một Quận.\n"
     "2. Xác định rõ chủ đề/hoạt động cho từng buổi.\n"
@@ -67,7 +72,10 @@ _ITINERARY_PLANNER_SYSTEM_PROMPT = (
     "   - \"place\" (địa điểm du lịch, vui chơi, tham quan)\n"
     "   - \"restaurant\" (nhà hàng, quán ăn, quán cà phê)\n"
     "   - \"hotel\" (nơi lưu trú, khách sạn. LUÔN LUÔN tạo 1 object riêng ở CUỐI mảng JSON với day='Lưu trú')\n\n"
-    "BẮT BUỘC trả về kết quả dưới dạng một JSON array thuần túy. Cấu trúc như sau:\n"
+    "Hãy xem các ví dụ mẫu sau đây để làm theo:\n\n"
+    "### VÍ DỤ 1:\n"
+    "Người dùng: \"Gợi ý lịch trình 2 ngày 1 đêm\"\n"
+    "Trả về JSON:\n"
     "[\n"
     "  {\n"
     "    \"day\": 1,\n"
@@ -82,15 +90,41 @@ _ITINERARY_PLANNER_SYSTEM_PROMPT = (
     "      {\n"
     "        \"session\": \"Chiều\",\n"
     "        \"district\": \"hai chau\",\n"
-    "        \"theme\": \"chủ đề của buổi\",\n"
-    "        \"query\": \"câu truy vấn tìm kiếm\",\n"
+    "        \"theme\": \"vui chơi\",\n"
+    "        \"query\": \"công viên châu á\",\n"
     "        \"collection_type\": \"place\"\n"
     "      },\n"
     "      {\n"
     "        \"session\": \"Tối\",\n"
     "        \"district\": \"hai chau\",\n"
-    "        \"theme\": \"chủ đề của buổi\",\n"
-    "        \"query\": \"câu truy vấn tìm kiếm\",\n"
+    "        \"theme\": \"ăn hải sản\",\n"
+    "        \"query\": \"nhà hàng hải sản ngon\",\n"
+    "        \"collection_type\": \"restaurant\"\n"
+    "      }\n"
+    "    ]\n"
+    "  },\n"
+    "  {\n"
+    "    \"day\": 2,\n"
+    "    \"slots\": [\n"
+    "      {\n"
+    "        \"session\": \"Sáng\",\n"
+    "        \"district\": \"son tra\",\n"
+    "        \"theme\": \"tắm biển\",\n"
+    "        \"query\": \"bãi biển mỹ khê\",\n"
+    "        \"collection_type\": \"place\"\n"
+    "      },\n"
+    "      {\n"
+    "        \"session\": \"Chiều\",\n"
+    "        \"district\": \"son tra\",\n"
+    "        \"theme\": \"tham quan\",\n"
+    "        \"query\": \"chùa linh ứng bán đảo sơn trà\",\n"
+    "        \"collection_type\": \"place\"\n"
+    "      },\n"
+    "      {\n"
+    "        \"session\": \"Tối\",\n"
+    "        \"district\": \"son tra\",\n"
+    "        \"theme\": \"ăn tối\",\n"
+    "        \"query\": \"quán ăn sơn trà\",\n"
     "        \"collection_type\": \"restaurant\"\n"
     "      }\n"
     "    ]\n"
@@ -108,8 +142,102 @@ _ITINERARY_PLANNER_SYSTEM_PROMPT = (
     "    ]\n"
     "  }\n"
     "]\n\n"
-    "Dựa vào số ngày người dùng yêu cầu để tạo số lượng ngày tương ứng (mặc định 3 ngày 2 đêm).\n"
-    "Chỉ trả về chuỗi JSON array hợp lệ."
+    "### VÍ DỤ 2:\n"
+    "Người dùng: \"Gợi ý lịch trình 3 ngày 2 đêm cho gia đình\"\n"
+    "Trả về JSON:\n"
+    "[\n"
+    "  {\n"
+    "    \"day\": 1,\n"
+    "    \"slots\": [\n"
+    "      {\n"
+    "        \"session\": \"Sáng\",\n"
+    "        \"district\": \"hai chau\",\n"
+    "        \"theme\": \"tham quan\",\n"
+    "        \"query\": \"cầu sông hàn\",\n"
+    "        \"collection_type\": \"place\"\n"
+    "      },\n"
+    "      {\n"
+    "        \"session\": \"Chiều\",\n"
+    "        \"district\": \"hai chau\",\n"
+    "        \"theme\": \"vui chơi\",\n"
+    "        \"query\": \"công viên châu á\",\n"
+    "        \"collection_type\": \"place\"\n"
+    "      },\n"
+    "      {\n"
+    "        \"session\": \"Tối\",\n"
+    "        \"district\": \"hai chau\",\n"
+    "        \"theme\": \"ăn hải sản\",\n"
+    "        \"query\": \"nhà hàng hải sản ngon\",\n"
+    "        \"collection_type\": \"restaurant\"\n"
+    "      }\n"
+    "    ]\n"
+    "  },\n"
+    "  {\n"
+    "    \"day\": 2,\n"
+    "    \"slots\": [\n"
+    "      {\n"
+    "        \"session\": \"Sáng\",\n"
+    "        \"district\": \"son tra\",\n"
+    "        \"theme\": \"tắm biển\",\n"
+    "        \"query\": \"bãi biển mỹ khê\",\n"
+    "        \"collection_type\": \"place\"\n"
+    "      },\n"
+    "      {\n"
+    "        \"session\": \"Chiều\",\n"
+    "        \"district\": \"son tra\",\n"
+    "        \"theme\": \"tham quan\",\n"
+    "        \"query\": \"chùa linh ứng bán đảo sơn trà\",\n"
+    "        \"collection_type\": \"place\"\n"
+    "      },\n"
+    "      {\n"
+    "        \"session\": \"Tối\",\n"
+    "        \"district\": \"son tra\",\n"
+    "        \"theme\": \"ăn tối\",\n"
+    "        \"query\": \"quán ăn sơn trà\",\n"
+    "        \"collection_type\": \"restaurant\"\n"
+    "      }\n"
+    "    ]\n"
+    "  },\n"
+    "  {\n"
+    "    \"day\": 3,\n"
+    "    \"slots\": [\n"
+    "      {\n"
+    "        \"session\": \"Sáng\",\n"
+    "        \"district\": \"ngu hanh son\",\n"
+    "        \"theme\": \"leo núi tham quan\",\n"
+    "        \"query\": \"chùa non nước ngũ hành sơn\",\n"
+    "        \"collection_type\": \"place\"\n"
+    "      },\n"
+    "      {\n"
+    "        \"session\": \"Chiều\",\n"
+    "        \"district\": \"hai chau\",\n"
+    "        \"theme\": \"mua sắm đặc sản\",\n"
+    "        \"query\": \"chợ hàn mua sắm\",\n"
+    "        \"collection_type\": \"place\"\n"
+    "      },\n"
+    "      {\n"
+    "        \"session\": \"Tối\",\n"
+    "        \"district\": \"hai chau\",\n"
+    "        \"theme\": \"cà phê\",\n"
+    "        \"query\": \"quán cà phê đẹp hải châu\",\n"
+    "        \"collection_type\": \"restaurant\"\n"
+    "      }\n"
+    "    ]\n"
+    "  },\n"
+    "  {\n"
+    "    \"day\": \"Lưu trú\",\n"
+    "    \"slots\": [\n"
+    "      {\n"
+    "        \"session\": \"Gợi ý\",\n"
+    "        \"district\": \"hai chau\",\n"
+    "        \"theme\": \"Khách sạn/Homestay\",\n"
+    "        \"query\": \"khách sạn tiện nghi\",\n"
+    "        \"collection_type\": \"hotel\"\n"
+    "      }\n"
+    "    ]\n"
+    "  }\n"
+    "]\n\n"
+    "Chỉ trả về duy nhất chuỗi JSON array hợp lệ. Không giải thích, không markdown."
 )
 
 # Prompt rút gọn cho nhánh Gemini fallback: không có "Reference data" nên không
@@ -732,9 +860,7 @@ class RAGPipeline:
         prebuilt_context = None
         
         if intent == QueryIntent.ITINERARY_SEARCH:
-            print("📅 [Itinerary Mode] Bắt đầu phân tích lịch trình và lập kế hoạch...")
             plan = await loop.run_in_executor(None, self._run_itinerary_planner, standalone_q)
-            print(f"   Khung kế hoạch được tạo gồm {len(plan)} ngày")
             
             seen_itinerary_places = set()  # Dedup: ưu tiên địa điểm chưa xuất hiện
             all_itinerary_docs = []
@@ -744,7 +870,6 @@ class RAGPipeline:
                 day_num = day_info.get("day", 1)
                 slots = day_info.get("slots", [])
                 
-                print(f"\n   📅 Ngày {day_num}:")
                 for slot in slots:
                     session = slot.get("session", "")
                     district = slot.get("district")
@@ -752,7 +877,6 @@ class RAGPipeline:
                     slot_query = slot.get("query", "")
                     col_type = slot.get("collection_type", "place")
                     
-                    print(f"     * Buổi {session} ({district or 'Tự do'} - {theme}): {slot_query!r}")
                     
                     slot_intent = QueryIntent.PLACE_SEARCH
                     if col_type == "restaurant":
@@ -776,7 +900,6 @@ class RAGPipeline:
                     
                     # Nếu retrieve với district trả rỗng → mở rộng không giới hạn quận
                     if not raw_docs and district:
-                        print(f"       ⚠️ Không có kết quả ở quận {district}. Mở rộng tìm toàn Đà Nẵng...")
                         slot_filters_broad = slot_filters.copy()
                         slot_filters_broad["district"] = None
                         raw_docs = await retrieve_by_intent(
@@ -812,10 +935,8 @@ class RAGPipeline:
                     # để context không bị rỗng (tránh LLM giữ nguyên placeholder)
                     if not slot_top_docs and ranked_docs:
                         slot_top_docs = ranked_docs[:2]
-                        print(f"       ♻️ DB hết địa điểm mới, reuse top docs cho buổi {session}")
                     elif not slot_top_docs and raw_docs:
                         slot_top_docs = raw_docs[:2]
-                        print(f"       ♻️ DB hết địa điểm mới, reuse raw docs cho buổi {session}")
                     
                     # Đánh dấu seen chỉ với docs thực sự mới
                     for doc in slot_top_docs:
