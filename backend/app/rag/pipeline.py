@@ -39,7 +39,7 @@ _SYSTEM_PROMPT = (
     "1. TUYỆT ĐỐI KHÔNG được sử dụng các cụm từ kỹ thuật như 'dựa trên context', 'trong context', 'theo context cung cấp', 'dữ liệu đã cho', 'hệ thống', 'cơ sở dữ liệu', 'CONTEXT', 'thông tin trong CONTEXT', v.v. Hãy nói chuyện tự nhiên như một hướng dẫn viên bản địa thực thụ đang chia sẻ từ kiến thức và trải nghiệm cá nhân.\n"
     "2. Chỉ dùng các thông tin có thật về địa chỉ, giá cả, đánh giá từ mô tả địa điểm. KHÔNG bịa đặt hay suy diễn thêm.\n"
     "3. Nếu không đủ thông tin để trả lời, hãy thân thiện cho khách biết và gợi ý lựa chọn thay thế.\n"
-    "4. Trả lời bằng tiếng Việt, tự nhiên, hào hứng, hiếu khách.\n"
+    "4. Trả lời bằng tiếng Việt, tự nhiên, hào hứng, hiếu khách. BẮT BUỘC dịch mọi thông tin bằng tiếng Anh từ dữ liệu cung cấp (mô tả, tiện ích, lý do chọn, v.v.) sang tiếng Việt tự nhiên.\n"
     "5. Định dạng rõ ràng: dùng gạch đầu dòng hoặc đánh số khi liệt kê nhiều địa điểm. Với mỗi gợi ý: tên, địa chỉ (nếu có), giá tham khảo (nếu có), điểm nổi bật.\n"
     "6. Với câu hỏi lịch trình (itinerary), chia theo ngày rõ ràng và tuyệt đối không lặp lại địa điểm.\n"
     "7. KHÔNG đề xuất địa điểm ngoài Đà Nẵng trừ khi được yêu cầu.\n"
@@ -354,7 +354,7 @@ def _format_context(results: List[SearchResultSchema], max_items: int = 8, max_c
         elif r.time_open:
             lines.append(f"   - Giờ mở cửa: {r.time_open}")
         if r.content:
-            lines.append(f"   - Nội dung: {r.content[:300]}")
+            lines.append(f"   - Nội dung: {r.content[:1000]}")
         if r.room_name:
             cap = f" (Sức chứa: {r.capacity} người)" if r.capacity else ""
             area = f", {r.area_m2:.0f} m²" if r.area_m2 else ""
@@ -568,7 +568,7 @@ def _build_messages(
             "### **Gợi ý Lưu trú**\n"
             "*   **Tên:** [Tên khách sạn]\n"
             "    *   **Địa chỉ:** [Địa chỉ]\n"
-            "    *   **Lý do nên chọn:** [Mô tả lý do chọn /điểm nổi bật, chú ý mô tả bằng tiếng việt nếu dữ liệu trả về là tiếng anh ]\n"
+            "    *   **Lý do nên chọn:** [BẮT BUỘC viết bằng tiếng Việt. Nếu dữ liệu nguồn là tiếng Anh, hãy dịch nghĩa và diễn đạt lại một cách tự nhiên bằng tiếng Việt]\n"
             "    *   **Chi phí tham khảo từ:** [lấy đúng từ dữ liệu]\n\n"
             "TUYỆT ĐỐI KHÔNG tự bịa tên địa điểm hoặc giữ nguyên các chữ [Tên địa điểm], [Lấy từ dữ liệu]. Nếu dữ liệu thực tế cho một buổi ghi 'Không tìm thấy địa điểm thực tế phù hợp', hãy ghi rõ: 'Hiện chưa có gợi ý phù hợp cho buổi này'.\n"
             "Tuyệt đối không gộp chung thành một đoạn văn."
@@ -591,7 +591,9 @@ def _build_messages(
 ---
 Câu hỏi: {standalone_q}
 
-Hướng dẫn bổ sung: {hint}"""
+Hướng dẫn bổ sung: {hint}
+
+LƯU Ý BẮT BUỘC: Tất cả các trường thông tin trong câu trả lời (bao gồm 'Lý do nên chọn' và 'Điểm nổi bật') PHẢI được viết bằng TIẾNG VIỆT. Nếu thông tin địa điểm cung cấp bằng tiếng Anh, bạn phải tự dịch nghĩa và diễn đạt lại bằng tiếng Việt. TUYỆT ĐỐI KHÔNG để nguyên văn câu tiếng Anh nào."""
 
     system_content = _SYSTEM_PROMPT
 
